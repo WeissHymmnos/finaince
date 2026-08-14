@@ -1,0 +1,22 @@
+# First-wave translatable operators. Unlisted => translatable=false.
+operators:
+  - {name: Rank, arity: 1}
+  - {name: CSRank, arity: 1}
+  - {name: Ref, arity: 2}
+  - {name: Delta, arity: 2}
+  - {name: Mean, arity: 2}
+  - {name: Std, arity: 2}
+  - {name: Corr, arity: 3, aliases: [Correlation]}
+  - {name: Sum, arity: 2}
+  - {name: Max, arity: 2}
+  - {name: Min, arity: 2}
+  - {name: Abs, arity: 1}
+  - {name: Log, arity: 1}
+  - {name: Sign, arity: 1}
+  - {name: Delay, arity: 2, maps_to: Ref}
+  - {name: Ts_Mean, arity: 2, maps_to: Mean}
+  - {name: Ts_Std, arity: 2, maps_to: Std}
+  - {name: Greater, arity: 2}
+  - {name: Less, arity: 2}
+  - {name: If, arity: 3}
+  - {name: Divide, arity: 2, aliases: [Div]}

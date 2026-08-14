@@ -1,0 +1,17 @@
+.venv/
+.pytest_cache/
+.benchmarks/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+output/
+data/
+results/
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite3
+*.lock

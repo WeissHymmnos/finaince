@@ -1,0 +1,31 @@
+{
+  "expressions": [
+    {
+      "expression": "Rank(Delta(close, 1))",
+      "ic_mean": -0.14285714285714285,
+      "sharpe_ratio": -2.3926071342779247,
+      "rows": 58,
+      "start": "2023-01-02",
+      "end": "2023-02-10",
+      "universe": "local_panel"
+    },
+    {
+      "expression": "Ref(close, 20)",
+      "ic_mean": -0.1111111111111111,
+      "sharpe_ratio": -1.4841365309376278,
+      "rows": 20,
+      "start": "2023-01-02",
+      "end": "2023-02-10",
+      "universe": "local_panel"
+    },
+    {
+      "expression": "Mean(close, 5)",
+      "ic_mean": -0.12,
+      "sharpe_ratio": -1.7915539301519556,
+      "rows": 52,
+      "start": "2023-01-02",
+      "end": "2023-02-10",
+      "universe": "local_panel"
+    }
+  ]
+}

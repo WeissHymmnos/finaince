@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "finaince"
+version = "0.1.0"
+description = "Unified factor discovery (aiminer) and 研报复现 (reproagent) surface, plus Claude Agent SDK custom tools."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+    "typer>=0.12",
+    "pandas",
+    "numpy",
+    "loguru",
+    "python-dotenv",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+reproduction = [
+    "reproagent",
+    "aiminer",
+]
+discovery = [
+    "aiminer",
+]
+all = [
+    "finaince[reproduction,discovery]",
+]
+
+[tool.uv.sources]
+reproagent = { path = "../reproagent", editable = true }
+aiminer = { path = "../aiminer", editable = true }
+
+[project.scripts]
+finaince = "finaince.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/finaince"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/finaince" = "finaince"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "live: real PDF / RiceQuant / CPA DeepSeek calls (network, credentials)",
+]

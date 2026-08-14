@@ -1,0 +1,28 @@
+name: packaging-312
+on:
+  push:
+  pull_request:
+jobs:
+  isolated-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: finaince
+      - name: Stage sibling trees
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          cp -a finaince "$RUNNER_TEMP/pack/finaince"
+          if [ -d ../reproagent ]; then cp -a ../reproagent "$RUNNER_TEMP/pack/reproagent"; fi
+          if [ -d ../aiminer ]; then cp -a ../aiminer "$RUNNER_TEMP/pack/aiminer"; fi
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+      - name: Install extras without path hack
+        working-directory: ${{ runner.temp }}/pack/finaince
+        env:
+          FINAINCE_NO_PATH_HACK: "1"
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ../reproagent -e ../aiminer -e ".[reproduction]"
+          .venv/bin/python -c "import reproagent, finaince; from aiminer.manager import cull_alpha_pool; print('ok', cull_alpha_pool)"
