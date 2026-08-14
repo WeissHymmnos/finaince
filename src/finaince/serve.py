@@ -276,6 +276,12 @@ def create_app() -> Any:
         items = list_chain(limit=limit)
         return {"items": items, "count": len(items)}
 
+    @app.get("/api/v1/baseline")
+    def baseline_route() -> dict[str, Any]:
+        from finaince.baseline import run_locked_baseline
+
+        return run_locked_baseline()
+
     @app.post("/api/v1/impl")
     def impl_route(body: dict[str, Any]) -> dict[str, Any]:
         from finaince.jobs.runner import run_impl_job

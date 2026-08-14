@@ -193,8 +193,24 @@ def test_doctor_reports_isolator_and_qlib_child(isolated_home: Path) -> None:
 def test_workbench_runs_page_lists_trace() -> None:
     root = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src"
     runs = (root / "pages" / "SwarmRunsPage.tsx").read_text()
+    detail = (root / "pages" / "SwarmRunDetailPage.tsx").read_text()
     api = (root / "lib" / "api.ts").read_text()
     assert "listTrace" in api and "/api/v1/trace" in api
     assert "listTrace" in runs and "desk-trace" in runs
+    assert "listTrace" in detail and "/api/v1/trace" in detail or "listTrace" in detail
     playbook = Path(__file__).resolve().parents[1] / "src" / "finaince" / "agent_playbook.py"
     assert "trace" in playbook.read_text().lower()
+
+
+def test_locked_baseline_is_local_panel_not_paper_arr(isolated_home: Path) -> None:
+    from finaince.baseline import LOCKED_WINDOW, run_locked_baseline
+
+    out = run_locked_baseline()
+    assert out["window"]["universe"] == "local_panel"
+    assert out["window"]["universe"] != "csi300"
+    assert "not CSI300" in out["claim"]
+    assert "ARR" in out["claim"]
+    assert out["window"]["start"] == LOCKED_WINDOW["start"]
+    assert isinstance(out["ok"], bool)
+    if out["ok"]:
+        assert out["metrics"].get("rows") is not None

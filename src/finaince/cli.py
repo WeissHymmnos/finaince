@@ -483,6 +483,14 @@ def impl_cmd(
         raise typer.Exit(code=1)
 
 
+@app.command("baseline")
+def baseline_cmd() -> None:
+    """Locked local-panel window. Not a CSI300 or paper-ARR claim."""
+    from finaince.baseline import run_locked_baseline
+
+    typer.echo(json.dumps(run_locked_baseline(), default=str, ensure_ascii=False, indent=2))
+
+
 @app.command("loop")
 def loop_cmd(steps: int = typer.Option(2, "--steps")) -> None:
     """Alternate a factor step and a model step toward a portfolio metric."""
