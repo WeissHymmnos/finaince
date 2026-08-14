@@ -60,3 +60,51 @@ def annotate_reproduce(result: dict[str, Any] | None) -> dict[str, Any]:
         if described or untranslatable:
             out["status"] = "needs_impl"
     return out
+
+
+def draft_isolated_source(*, expression: str | None = None, name: str = "needs_impl_draft") -> str:
+    """Frozen-sandbox draft. No pip. Comment records the untranslatable text."""
+    note = (expression or "described factor").replace("\n", " ")[:180]
+    safe_name = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in name) or "needs_impl_draft"
+    return (
+        f"NAME = {safe_name!r}\n"
+        f"# drafted from needs_impl: {note}\n"
+        "def compute(panel):\n"
+        "    close = list(panel['close'])\n"
+        "    out = [0.0]\n"
+        "    for i in range(1, len(close)):\n"
+        "        prev = close[i - 1] if close[i - 1] else 1.0\n"
+        "        out.append((close[i] - close[i - 1]) / prev)\n"
+        "    return out\n"
+    )
+
+
+def fulfill_needs_impl(
+    outcome: dict[str, Any] | None,
+    *,
+    universe: str = "local_panel",
+) -> dict[str, Any]:
+    """If the outcome is needs_impl, draft + run the shipped isolator. Empty stays no_factors."""
+    from finaince.isolate import run_isolated, upsert_isolated
+
+    raw = dict(outcome or {})
+    stamped = raw if raw.get("impl_status") else annotate_reproduce(raw)
+    status = str(stamped.get("impl_status") or "")
+    if status == "no_factors":
+        return {"ok": False, "impl_status": "no_factors", "status": "no_factors"}
+    if status != "needs_impl":
+        return {"ok": False, "impl_status": status, "error": "not_needs_impl"}
+    formula = str(raw.get("expression") or "")
+    if not formula:
+        for item in raw.get("factors") or []:
+            if isinstance(item, dict) and (item.get("formula") or item.get("expression")):
+                formula = str(item.get("formula") or item.get("expression"))
+                break
+    source = draft_isolated_source(expression=formula or raw.get("description"))
+    isolated = run_isolated(source, name="needs_impl_draft")
+    isolated["impl_status"] = "needs_impl"
+    isolated["draft"] = source
+    if not isolated.get("ok"):
+        return isolated
+    stored = upsert_isolated(isolated, universe=universe)
+    return {**isolated, **stored}

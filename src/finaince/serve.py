@@ -285,6 +285,12 @@ def create_app() -> Any:
             raise HTTPException(400, "source required")
         return run_impl_job(source, name=str(body.get("name") or "isolated"), universe=str(body.get("universe") or "local_panel"))
 
+    @app.post("/api/v1/impl/needs")
+    def impl_needs_route(body: dict[str, Any] | None = None) -> dict[str, Any]:
+        from finaince.impl_status import fulfill_needs_impl
+
+        return fulfill_needs_impl(body or {})
+
     @app.post("/api/v1/loop")
     def loop_route(body: dict[str, Any] | None = None) -> dict[str, Any]:
         from finaince.jobs.runner import run_loop_job

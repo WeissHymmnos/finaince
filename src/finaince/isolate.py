@@ -122,11 +122,61 @@ def run_isolated(source: str, *, name: str = "isolated", panel: dict[str, Any] |
         return {"ok": False, "skipped": True, "error": str(exc)}
     if completed.returncode != 0:
         err = (completed.stderr or completed.stdout or "isolate_child_failed")[:400]
-        return {"ok": False, "error": err}
+        out = {"ok": False, "error": err}
+        return _remember_isolate(out, name=name)
     try:
-        return json.loads(completed.stdout.strip().splitlines()[-1])
+        parsed = json.loads(completed.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError) as exc:
-        return {"ok": False, "error": f"isolate_bad_json: {exc}", "raw": completed.stdout[:400]}
+        parsed = {"ok": False, "error": f"isolate_bad_json: {exc}", "raw": completed.stdout[:400]}
+    return _remember_isolate(parsed, name=name)
+
+
+def error_prefix(error: str | None) -> str:
+    text = (error or "").strip()
+    if not text:
+        return ""
+    return text.split(":", 1)[0].strip()[:80]
+
+
+def similar_errors(error: str | None = None, *, limit: int = 5) -> list[dict[str, Any]]:
+    """Retrieve prior isolate/eval errors with the same class/prefix from the real chain."""
+    from finaince.trace import list_chain
+
+    prefix = error_prefix(error)
+    hits: list[dict[str, Any]] = []
+    for ev in list_chain(limit=80):
+        ev_err = str(ev.get("error") or "")
+        if not ev_err:
+            continue
+        if prefix and error_prefix(ev_err) != prefix and not ev_err.startswith(prefix):
+            continue
+        hits.append(
+            {
+                "id": ev.get("id"),
+                "action": ev.get("action"),
+                "error": ev_err,
+                "summary": ev.get("summary"),
+            }
+        )
+        if len(hits) >= max(1, int(limit)):
+            break
+    return hits
+
+
+def _remember_isolate(result: dict[str, Any], *, name: str) -> dict[str, Any]:
+    try:
+        from finaince.trace import append_event
+
+        append_event(
+            "isolated_impl",
+            metrics={"ok": result.get("ok"), "name": name},
+            error=None if result.get("ok") else str(result.get("error") or "isolate_failed"),
+            summary=f"isolate {name} ok={result.get('ok')}",
+        )
+    except Exception:
+        pass
+    result["similar_errors"] = similar_errors(None if result.get("ok") else str(result.get("error") or ""))
+    return result
 
 
 def upsert_isolated(result: dict[str, Any], *, universe: str = "local_panel") -> dict[str, Any]:

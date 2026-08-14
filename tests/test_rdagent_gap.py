@@ -7,9 +7,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from finaince.eval.router import EvalRequest, evaluate
-from finaince.impl_status import annotate_reproduce, classify_research_outcome
-from finaince.isolate import child_isolate, run_isolated, upsert_isolated
-from finaince.loop import choose_next_action, run_loop
+from finaince.impl_status import annotate_reproduce, classify_research_outcome, fulfill_needs_impl
+from finaince.isolate import child_isolate, run_isolated, similar_errors, upsert_isolated
+from finaince.loop import choose_next_action, run_loop, train_linear_head
 from finaince.review.gates import evaluate_gates
 from finaince.serve import create_app
 from finaince.trace import list_chain
@@ -81,9 +81,17 @@ def test_isolated_impl_fail_then_success_and_gates(isolated_home: Path) -> None:
     assert via.get("ok") is True or via.get("skipped") is True
     if via.get("skipped"):
         assert via.get("error")
+    failed = run_isolated("import socket\n", name="iso_fail")
+    assert failed.get("ok") is False
+    hits = similar_errors(failed.get("error"))
+    assert hits
+    assert any("ImportError" in str(h.get("error") or "") for h in hits)
+    second = run_isolated(GOOD_SRC, name="iso_after_fail")
+    consulted = second.get("similar_errors") or similar_errors("ImportError")
+    assert any("ImportError" in str(h.get("error") or "") for h in consulted)
 
 
-def test_empty_extract_stays_no_factors_described_needs_impl() -> None:
+def test_empty_extract_stays_no_factors_described_needs_impl(isolated_home: Path) -> None:
     empty = classify_research_outcome(factor_count=0, described=False, status="no_factors")
     assert empty == "no_factors"
     stamped = annotate_reproduce({"status": "no_factors", "factors": [], "factor_count": 0})
@@ -101,17 +109,52 @@ def test_empty_extract_stays_no_factors_described_needs_impl() -> None:
     assert described["impl_status"] == "needs_impl"
     runnable = classify_research_outcome(expression="Rank(Delta(close, 1))")
     assert runnable == "runnable"
+    auto = fulfill_needs_impl(
+        {
+            "status": "no_factors",
+            "impl_status": "needs_impl",
+            "expression": "MyCustomAlpha(close)",
+            "factors": [{"formula": "MyCustomAlpha(close)", "name": "custom"}],
+        }
+    )
+    assert auto.get("impl_status") == "needs_impl"
+    if auto.get("ok"):
+        assert auto.get("catalog_id")
+        assert auto.get("draft")
+    empty_drive = fulfill_needs_impl({"status": "no_factors", "factors": [], "factor_count": 0})
+    assert empty_drive.get("impl_status") == "no_factors"
+    assert empty_drive.get("ok") is False
 
 
 def test_loop_alternates_factor_and_model(isolated_home: Path) -> None:
     assert choose_next_action([]) == "factor"
-    assert choose_next_action([{"action": "factor"}]) == "model"
+    assert choose_next_action([{"action": "factor", "ok": True, "metrics": {"return_points": 8}}]) == "model"
+    assert choose_next_action([{"action": "factor", "ok": False, "metrics": {}}]) == "factor"
+    assert (
+        choose_next_action(
+            [{"action": "model", "skip_reason": "no_factor_returns", "metrics": {"reason": "no_factor_returns"}}]
+        )
+        == "factor"
+    )
+    assert choose_next_action([{"action": "model", "metrics": {"portfolio_return": 0.04}}]) == "model"
+    assert choose_next_action([{"action": "model", "metrics": {"portfolio_return": -0.02}}]) == "factor"
+    trained = train_linear_head({f"2024-01-{d:02d}": 0.01 * ((-1) ** d) for d in range(1, 16)})
+    if trained.get("skipped"):
+        assert trained.get("reason")
+    else:
+        assert (trained.get("model_config") or {}).get("kind") == "ols_linear"
+        assert (trained.get("model_config") or {}).get("coef")
+        assert trained.get("equity_curve")
     out = run_loop(steps=2)
     assert "factor" in out["actions"]
     assert "model" in out["actions"]
     assert out.get("factor_set") is not None
     assert out.get("model_config") is not None
-    if not out.get("equity_curve"):
+    kind = (out.get("model_config") or {}).get("kind")
+    if out.get("equity_curve"):
+        assert kind == "ols_linear"
+        assert (out.get("model_config") or {}).get("coef")
+    else:
         assert out.get("skip_reason") or out.get("degraded")
 
 
@@ -145,3 +188,13 @@ def test_doctor_reports_isolator_and_qlib_child(isolated_home: Path) -> None:
     assert isinstance(doc["qlib_child"].get("ok"), bool)
     qlib = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
     assert qlib.ok is False
+
+
+def test_workbench_runs_page_lists_trace() -> None:
+    root = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src"
+    runs = (root / "pages" / "SwarmRunsPage.tsx").read_text()
+    api = (root / "lib" / "api.ts").read_text()
+    assert "listTrace" in api and "/api/v1/trace" in api
+    assert "listTrace" in runs and "desk-trace" in runs
+    playbook = Path(__file__).resolve().parents[1] / "src" / "finaince" / "agent_playbook.py"
+    assert "trace" in playbook.read_text().lower()
