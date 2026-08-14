@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| 日期 | 2026-08-14 |
+| 日期 | 2026-08-14（2026-08-14 晚按仓库补丁修订：A/B/C/D 骨架已进主链） |
 | 对照对象 | Microsoft Research Asia **RD-Agent**（`microsoft/RD-Agent`，NeurIPS 2025 *R&D-Agent-Quant*） |
 | 本侧 | **FinAlpha**（包名 `finaince`）+ 引擎 `aiminer` / `reproagent` |
 | 原则 | 对照公开代码与论文场景，不拿宣传页上的「卫星/舆情/物流」当量化主链；本侧以仓库现状为准，不以过期规划文档为准 |
@@ -57,9 +57,10 @@ FinAlpha 是**中国卖方研究台**：人打开 `finaince serve`，用 catalog
 - **复现**：`reproagent` 摄入 → `finpdfpro` 版面/公式 → polars 回测 → 偏差自愈 → 库；`no_factors` 是合法终态。
 - **平台壳**：`FactorRecord` catalog、`(dialect, backend)` eval、`promote → review → approve` fail-closed（`thin_panel` / `formula_proxy` / 空 IC / 空收益 / 相关）、JobRunner、同源 `/` + `/api/v1`、`finaince doctor`。
 - **Agent**：Claude Agent SDK + 进程内工具 + 发现/复现/复核三个 specialist。**一次 query，不是过夜 R/D 环。**
-- **知识**：chroma RAG + wiki vault + reproagent `report_knowledge` / feedback。没有「上一步失败 → 下一步改因子还是改模型」的因果树。
-- **qlib**：3.12 上 `POST /api/v1/eval dialect=qlib` **诚实 `ok: false`**（占位或子进程）。不是 CSI300 上的活 AlphaEval。
-- **工作台**：Catalog / Review / Reproduce / Agent / Swarm / Pool / Manual / Wiki 同源；Refresh 深链仍出壳。
+- **知识**：chroma RAG + wiki vault + reproagent `report_knowledge` / feedback。**另有** `trace_events`：eval / job（reproduce、swarm、impl、loop）追加一条，后一条 `cites` 前一条 id。还不是带 hypothesis 正文的研发树。
+- **qlib**：3.12 上 `POST /api/v1/eval dialect=qlib` **诚实 `ok: false`**（占位或子进程）。doctor / health 报告 `isolator`、`qlib_child`。
+- **工作台**：Catalog / Review / Reproduce / Agent / Swarm / Pool / Manual / Wiki 同源。
+- **已补骨架（2026-08-14）**：`finaince trace` / `GET /api/v1/trace`；`finaince impl` 冻结模块跑 `compute(panel)` 再 upsert catalog（仍过门禁）；`finaince loop` 交替 factor + thin long-short 组合曲线；空抽取 `no_factors`，能描述但译不了 `needs_impl`。
 
 ---
 
@@ -68,53 +69,45 @@ FinAlpha 是**中国卖方研究台**：人打开 `finaince serve`，用 catalog
 | 维度 | RD-Agent (Q) | FinAlpha | 判定 |
 |------|----------------|----------|------|
 | 产品形态 | 无人值守 R&D 工厂，CLI scenario | 研究员工作台 + 引擎调度 | 定位差 |
-| 研究环 | Trace 上 R 提议、D 实现、反馈回写 | 人点按钮 / 一次 agent turn | **真差距** |
-| 因子形态 | Docker 里的 Python + Qlib 数据模板 | 白名单表达式 + polars 方言 | **真差距**（深度）；本侧更可控 |
-| 模型研发 | LSTM/GRU/PTNN、超参、与因子交替 | 无模型架构搜索；有组合模板/手工回测 | **真差距** |
-| 因子–模型协同 | bandit/LLM 选下一步 | 两条线靠 catalog 汇合，无联合目标 | **真差距** |
-| 研报 | LangChain PDF + 截图 → 再实现 | finpdfpro 版面/公式 → 回测 → 偏差 | **本侧更深**（中文卖方） |
-| 实现进化 | CoSTEER：错因摘要 + 相似失败 | 复现有偏差自愈；swarm 靠下一轮角色 | 半差距 |
-| 评测宇宙 | Qlib CSI300 长窗、组合分析 | 本地薄面板 / 米筐；门禁防伪 CSI300 | 本侧更诚实；他们更接近「论文宇宙」 |
-| 知识 | Trace + coder 成败库 | catalog + wiki + memory 表 | 半差距（缺因果链） |
+| 研究环 | Trace 上 R 提议、D 实现、反馈回写 | 人点按钮 / 一次 agent turn；**已有事件链** | 骨架已补，深度仍差 |
+| 因子形态 | Docker 里的 Python + Qlib 数据模板 | 默认白名单表达式；**可选冻结 `python_sandbox`** | 半差距（无 Docker/CoSTEER） |
+| 模型研发 | LSTM/GRU/PTNN、超参、与因子交替 | **thin equal-weight LS 头**，无架构搜索 | **仍差** |
+| 因子–模型协同 | bandit/LLM 读指标选下一步 | **`loop` 交替两步**，启发式翻转，非读指标 bandit | 骨架已补 |
+| 研报 | LangChain PDF + 截图 → 再实现 | finpdfpro 版面/公式 → 回测 → 偏差；`needs_impl` | **本侧更深** |
+| 实现进化 | CoSTEER：错因摘要 + 相似失败 | 复现自愈；isolate 失败进 trace，**无相似失败检索** | 半差距 |
+| 评测宇宙 | Qlib CSI300 长窗、组合分析 | 本地薄面板 / 米筐；门禁防伪 CSI300 | 本侧更诚实 |
+| 知识 | Trace + coder 成败库 | catalog + wiki + **cites 链** | 半差距 |
 | 人机复核 | 弱；看 UI trace | 晋升门禁、reject、audit | **本侧更强** |
 | 交付 | 单包 + Docker | 3.12 壳 + 3.10 swarm 拓扑 | 各有债 |
 | 基准数字 | MLE-bench、论文 ARR | 离线 pytest + 固定 PDF live | 他们有对外数字 |
 
 ---
 
-## 4. 真差距（值得补的）
+## 4. 还剩的真差距（骨架已落地之后）
 
-### 4.1 没有过夜研究环
+### 4.1 链在，过夜环不在
 
-RD-Agent 的 `Trace` 是一等公民：每步假设、动作、实验、反馈都挂在同一条历史上，下一步由 bandit 或 LLM **读历史** 决定。
+`trace_events` 能复盘「后一步 cite 前一步」。还没有：假设正文、LLM 读整段历史再决定、JobRunner 上的多小时无人值守。`finaince agent` 仍是一轮工具调用。
 
-FinAlpha 的 swarm 是「多角色同一代出表达式 + cull」。`finaince agent` 是最多十几轮的工具调用，停了历史就断。没有「这一轮模型换 GRU 是因为上一轮因子库 IC 饱和」这种可复盘决策。
+### 4.2 模型头太薄
 
-### 4.2 产出停在公式，到不了可训练模型
+`loop` 的 model 步是把因子日收益累成净值。RD-Agent 在训 LSTM/GRU/PTNN 并改超参。要到「联合进化」还差一个**可训练、可跳过**的预测头（线性 / LightGBM 即可），不是再堆一个 GRU 宣传点。
 
-RD-Agent 的 D 环写的是工作区代码和 Qlib 训练 yaml。FinAlpha 的 FactorAgent 只允许白名单算子。这换来可翻译、可门禁、难幻觉出 `scipy` 黑洞，但也意味着：
+### 4.3 动作选择不读指标
 
-- 学不到时序网络、非线性变换、可训练超参；
-- 和论文里「因子库 + 预测模型联合进化」不在一个产出层级。
+现在是「上次 factor 下次 model」。RD-Agent 的 bandit 看上一轮组合指标再分配。应把 `portfolio_return` / skip_reason 喂进 `choose_next_action`。
 
-### 4.3 没有因子–模型联合目标
+### 4.4 失败不会被下一轮检索
 
-`fin_quant` 用组合回测指标驱动「下一步改因子还是改模型」。FinAlpha 的 discovery 优化 selection/IC，reproduction 对齐研报，review 看门禁。三套目标，没有一个「策略 ARR / 稳健性」把两边拧在一起。
+isolate / eval 错误写进 trace，但 coder 不会查「同类 ImportError 最近 5 条」。轻量 CoSTEER（同 error 前缀检索）还没接上 `impl`。
 
-### 4.4 实现失败不会系统性进化
+### 4.5 研报 `needs_impl` 还不会自动开沙箱
 
-RD-Agent 把编译/形状/数值错误送进知识库，下一轮显式检索相似失败。FinAlpha 复现有偏差自愈，但 swarm 表达式挂了通常只是这一轮死掉。没有「这类 `Ts_Rank` 窗口在薄截面上炸了」的可查询失败档案。
+状态会打上，人要自己 `finaince impl`。缺：`needs_impl` → 生成 `compute(panel)` 草稿 → isolate → 同一套门禁。
 
-### 4.5 研报之后没有「实现进化」
+### 4.6 没有可引用的同宇宙基准
 
-RD-Agent：抽任务 → coder 在 Docker 里写到能跑。  
-FinAlpha：抽公式 → polars 回测 → 对不上就自愈或 `no_factors`。
-
-后者对卖方研报更诚实（抽不出就不装有）。但「公式能讲清楚、引擎跑不起来」时，没有一层 **受控代码补丁**（仍要过 validate + 门禁），只能停。
-
-### 4.6 没有对外可引用的研究基准
-
-RD-Agent 用 CSI300 + 固定切分讲 ARR。FinAlpha 有离线契约测试和三份 pinned PDF 的 live 标记，没有一份「同一宇宙、同一成本、可复现」的策略数字。qlib 在 3.12 上还不能当这条宇宙。
+没有锁定窗 + 成本 + 数据版本的对外数字。qlib 子进程在 3.12 上默认关。禁止用论文 ARR 当验收。
 
 ---
 
@@ -137,60 +130,47 @@ RD-Agent 用 CSI300 + 固定切分讲 ARR。FinAlpha 有离线契约测试和三
 
 总原则：把 R/D 环和 coder 进化**接在 catalog / review / jobs 后面**，不新开第三套引擎，不替换 finpdfpro。
 
-### 阶段 A — 研究记忆变成因果链（4–6 周）
+### 阶段 A — 因果链（骨架 **已落地**）
 
-**目标**：一次 swarm 或一次 reproduce 结束后，人能回答「下一步为什么改这个」。
+`trace_events` + job/eval 挂钩 + `finaince trace` + `GET /api/v1/trace`。后一条 cite 前一条。
 
-- 给每次 job 写 `TraceEvent`：假设、动作（`discover_expr` | `reproduce` | `eval` | `promote`）、指标摘要、错误、指向 catalog id。
-- 工作台 Run 详情展示这条链，而不是只 tail 日志。
-- Agent playbook 强制：先读最近 N 条 trace，再决定调用 `discover_swarm` 还是 `reproduce`。
-- **验收**：同一 `FINAINCE_HOME` 连跑两轮后，第二条事件能引用第一条的 `job_id` + 指标；单测走真实 `create_app()` / job runner，不重写一条假链。
+**还要**：工作台 Run 详情画出这条链；playbook 强制先 `GET /api/v1/trace`；事件上补可选 hypothesis 字段。
 
-这是 RD-Agent `Trace.hist` 的最小有用子集，不需要他们的全量 hypothesis 字段。
+### 阶段 B — 受控代码因子（骨架 **已落地**）
 
-### 阶段 B — 受控代码因子作为二等公民（6–8 周）
+`python_sandbox` + 冻结 `__import__` + catalog upsert + 原门禁。禁 pip。
 
-**目标**：表达式不够时，允许 **workspace 里的 Python 因子**，默认仍是白名单表达式。
+**还要**：失败按 error 前缀检索最近 5 条再生成下一稿（轻量 CoSTEER）；可选 bwrap/Docker 加固，不是默认路径。
 
-- 新 `expression.dialect = "python_sandbox"`。实现落在 `FINAINCE_HOME/workspaces/<id>`，**Docker 或 bwrap**，只读本地/米筐面板，超时杀掉。
-- 成功产物仍 upsert catalog：有 IC、日收益、`lineage.engine`。晋升走**同一套门禁**。
-- 失败写入 trace，供下一轮检索（轻量 CoSTEER：同错误类最近 5 条，不要上完整知识图谱）。
-- **不要**让沙箱 `pip install`。库表冻结（numpy/pandas/polars/scipy 白名单）。
-- **验收**：一个故意写错轴的因子第一次失败、第二次改对、catalog 出现一行；`thin_panel` 声称 CSI300 时 approve 仍拒绝。
+### 阶段 C — 因子–模型环（骨架 **已落地**）
 
-### 阶段 C — 因子–模型联合环（8–10 周，可与 B 部分重叠）
+`finaince loop` / `POST /api/v1/loop`：factor eval + equal_weight_ls 曲线。
 
-**目标**：`finaince discover --loop` 能交替「补因子」和「调预测头」，优化的是**组合指标**而不只是 IC。
+**还要**：`choose_next_action` 吃 `portfolio_return`；model 步可换成线性/LightGBM，训不动就 `skipped`；SOTA = catalog `ready` 行。
 
-- 预测头先做薄的：线性 / LightGBM / 一个固定 GRU，Qlib 或现有 polars 面板均可，**先锁一个宇宙**（建议：米筐或本地全样本，明确标注不是论文 CSI300）。
-- 动作选择先 bandit（因子 vs 模型），LLM 选择放后面。
-- SOTA 库 = catalog 里 `status=ready` 且过门禁的行，prompt 里禁止近似重复（已有相关 cull，接到 loop 即可）。
-- **验收**：固定种子、固定窗，loop 产出「因子集 + 一个模型配置 + 组合曲线」；数字写入 `output/loop-baseline/` 并提交配置，不提交「打赢 RD-Agent ARR」这种不可复现口号。
+### 阶段 D — 研报 → 实现（分类 **已落地**，自动补丁未做）
 
-### 阶段 D — 研报 → 实现进化，而不是研报 → 停（4 周）
+空抽取仍 `no_factors`；能描述不能跑 → `needs_impl`。
 
-**目标**：finpdfpro 抽出公式但 `repro_polars` 拒译时，走阶段 B 的沙箱补丁，而不是直接 `no_factors`。
+**还要**：`needs_impl` 自动起草 `compute(panel)` 再走 isolate，不要人手工粘代码。
 
-- `no_factors` 仍保留：抽取为空就必须诚实。
-- 新增 `status=needs_impl`：有自然语言/残缺公式，生成沙箱任务。
-- **验收**：广发系列 5 这类真空抽取仍是 `no_factors`；「公式能讲、方言不能跑」的夹具 PDF 能变成 catalog 一行或明确的 `needs_impl` 失败，而不是空成功。
+### 阶段 E — 可引用基准（持续，doctor 可用性 **已落地**）
 
-### 阶段 E — 可引用基准（持续）
+doctor / health 已报 isolator、qlib_child。
 
-- 3.10 上用真实 Qlib 子进程跑一组固定表达式，快照进 `tests/fixtures/`（已有 snapshot 方向，补宇宙与切分说明）。
-- 公开对照只报：**同数据、同窗、同成本** 的本侧数字。禁止用论文 ARR 当验收。
-- doctor 增加：qlib 子进程是否可用、Docker/沙箱是否可用。不可用 = `degraded`，不是假装 loop 在跑。
+**还要**：固定窗快照与成本说明；只报能复现的数字。
 
 ---
 
 ## 7. 建议排期与明确不做
 
 ```text
-现在 ──A 因果 trace──► 工作台能复盘
-        ──B 沙箱因子──► 表达式不够时仍能进 catalog
-            ──C 联合环──► 有策略级目标
-                ──D 研报补丁──► 抽取与实现断开时还能前进
-                    ──E 基准──► 对外只报可复现数字
+已做    A 因果 cite 链 · B 冻结 isolate · C 两步 loop · D 状态分类 · E doctor 字段
+下一步  C' 按组合指标选动作 + 可跳过的可训练头
+        B' 相似失败检索
+        D' needs_impl → 自动 isolate
+        A' 工作台画出 trace
+        E' 锁窗基准，不报论文 ARR
 ```
 
 **不做：**
