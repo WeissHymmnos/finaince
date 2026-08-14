@@ -53,6 +53,22 @@ def is_listed(expression: str) -> bool:
 
 
 def evaluate(req: EvalRequest) -> EvalResult:
+    result = _evaluate(req)
+    try:
+        from finaince.trace import append_event
+
+        append_event(
+            "eval",
+            metrics={"ok": result.ok, **(result.metrics or {})},
+            error=result.error,
+            summary=f"eval {req.dialect} ok={result.ok}",
+        )
+    except Exception:
+        pass
+    return result
+
+
+def _evaluate(req: EvalRequest) -> EvalResult:
     from finaince.eval.dialects import attach_translation
     from finaince.obs import emit
 

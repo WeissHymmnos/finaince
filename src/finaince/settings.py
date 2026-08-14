@@ -286,6 +286,20 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         from finaince.catalog.audit import verify_tail
 
         audit = verify_tail()
+    from finaince.eval.qlib_subprocess import qlib_subprocess_enabled
+    from finaince.isolate import isolator_available
+    from finaince.runtime import aiminer_python
+
+    isolator = isolator_available()
+    qlib_py = (aiminer_python() or os.environ.get("AIMINER_PYTHON") or "").strip()
+    qlib_child = {
+        "ok": bool(qlib_subprocess_enabled() and qlib_py and Path(qlib_py).expanduser().is_file()),
+        "enabled": qlib_subprocess_enabled(),
+        "python": qlib_py or None,
+    }
+    if not isolator.get("ok"):
+        ok = False
+        issues.append(f"isolator unavailable: {isolator.get('error')}")
     return {
         "product_name": cfg.product_name,
         "ok": ok,
@@ -326,6 +340,8 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         "extract_model": llm["model"],
         "orphan_results": orphan.is_file(),
         "audit": audit,
+        "isolator": isolator,
+        "qlib_child": qlib_child,
     }
 
 

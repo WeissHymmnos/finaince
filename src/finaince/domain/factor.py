@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-Dialect = Literal["qlib", "repro_polars"]
+Dialect = Literal["qlib", "repro_polars", "python_sandbox"]
 Source = Literal["discovery", "reproduction", "manual"]
 Status = Literal["candidate", "review", "ready", "deprecated", "culled"]
 

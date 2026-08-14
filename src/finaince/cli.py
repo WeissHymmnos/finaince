@@ -458,6 +458,40 @@ def serve_cmd(
     serve_main(host=host, port=port)
 
 
+@app.command("trace")
+def trace_cmd(limit: int = typer.Option(20, "--limit")) -> None:
+    """List the causal research chain for this FINAINCE_HOME."""
+    from finaince.trace import list_chain
+
+    items = list_chain(limit=limit)
+    typer.echo(json.dumps({"count": len(items), "items": items}, default=str, ensure_ascii=False, indent=2))
+
+
+@app.command("impl")
+def impl_cmd(
+    source_file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    name: str = typer.Option("isolated", "--name"),
+    universe: str = typer.Option("local_panel", "--universe"),
+) -> None:
+    """Run an isolated compute(panel) implementation and upsert catalog."""
+    from finaince.jobs.runner import run_impl_job
+
+    out = run_impl_job(source_file.read_text(encoding="utf-8"), name=name, universe=universe)
+    typer.echo(json.dumps(out, default=str, ensure_ascii=False))
+    result = out.get("result") if isinstance(out.get("result"), dict) else out
+    if not (out.get("ok") or (isinstance(result, dict) and result.get("ok"))):
+        raise typer.Exit(code=1)
+
+
+@app.command("loop")
+def loop_cmd(steps: int = typer.Option(2, "--steps")) -> None:
+    """Alternate a factor step and a model step toward a portfolio metric."""
+    from finaince.jobs.runner import run_loop_job
+
+    out = run_loop_job(steps=steps)
+    typer.echo(json.dumps(out, default=str, ensure_ascii=False))
+
+
 @app.command("sdk-info")
 def sdk_info_cmd() -> None:
     """Show Claude Agent SDK session options (custom MCP tools + hook)."""

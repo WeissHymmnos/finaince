@@ -146,6 +146,12 @@ def finish_job(
     out = dict(row)
     if result is not None:
         out["result"] = result
+    try:
+        from finaince.trace import record_job_finished
+
+        record_job_finished(out)
+    except Exception:
+        pass
     return out
 
 
@@ -353,3 +359,35 @@ def run_swarm_job(swarm_args: list[str] | None = None, *, sync: bool = True) -> 
         run=lambda: run_swarm(args) or {"ok": True},
         engine_run_id=engine_run_id,
     )
+
+
+def run_impl_job(
+    source: str,
+    *,
+    name: str = "isolated",
+    universe: str = "local_panel",
+    sync: bool = True,
+) -> dict[str, Any]:
+    from finaince.isolate import run_isolated, upsert_isolated
+
+    payload = {"name": name, "universe": universe}
+
+    def _run() -> dict[str, Any]:
+        isolated = run_isolated(source, name=name)
+        if not isolated.get("ok"):
+            return isolated
+        stored = upsert_isolated(isolated, universe=universe)
+        return {**isolated, **stored}
+
+    if not sync:
+        return submit("isolated_impl", payload)
+    return submit("isolated_impl", payload, run=_run)
+
+
+def run_loop_job(*, steps: int = 2, sync: bool = True) -> dict[str, Any]:
+    from finaince.loop import run_loop
+
+    payload = {"steps": int(steps)}
+    if not sync:
+        return submit("research_loop", payload)
+    return submit("research_loop", payload, run=lambda: run_loop(steps=steps))

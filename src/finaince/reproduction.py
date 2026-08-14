@@ -34,7 +34,10 @@ def reproduce_report(
         window = default_backtest_window(cfg.data_source)
         kwargs.setdefault("start_date", window["start_date"])
         kwargs.setdefault("end_date", window["end_date"])
-    return _reproduce_report(Path(pdf_path), cfg, backtest_kwargs=kwargs)
+    raw = _reproduce_report(Path(pdf_path), cfg, backtest_kwargs=kwargs)
+    from finaince.impl_status import annotate_reproduce
+
+    return annotate_reproduce(raw if isinstance(raw, dict) else {"status": "no_factors", "factors": []})
 
 
 def validate_expression(expression: str) -> dict[str, Any]:

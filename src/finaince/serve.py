@@ -265,6 +265,29 @@ def create_app() -> Any:
             raise HTTPException(400, "prompt required")
         return run_research_desk(prompt, max_turns=int(body.get("max_turns") or 16))
 
+    @app.get("/api/v1/trace")
+    def trace_route(limit: int = 50) -> dict[str, Any]:
+        from finaince.trace import list_chain
+
+        items = list_chain(limit=limit)
+        return {"items": items, "count": len(items)}
+
+    @app.post("/api/v1/impl")
+    def impl_route(body: dict[str, Any]) -> dict[str, Any]:
+        from finaince.jobs.runner import run_impl_job
+
+        source = str(body.get("source") or "")
+        if not source.strip():
+            raise HTTPException(400, "source required")
+        return run_impl_job(source, name=str(body.get("name") or "isolated"), universe=str(body.get("universe") or "local_panel"))
+
+    @app.post("/api/v1/loop")
+    def loop_route(body: dict[str, Any] | None = None) -> dict[str, Any]:
+        from finaince.jobs.runner import run_loop_job
+
+        steps = int((body or {}).get("steps") or 2)
+        return run_loop_job(steps=steps)
+
     _attach_workbench_root(app)
 
     aiminer_error: str | None = None
