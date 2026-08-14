@@ -133,11 +133,15 @@ def create_app() -> Any:
         from finaince.settings import doctor_report
 
         doc = doctor_report()
-        degraded = bool(doc.get("issues")) or jobs_degraded()
+        isolator_ok = bool((doc.get("isolator") or {}).get("ok"))
+        qlib_child = doc.get("qlib_child") or {}
+        degraded = bool(doc.get("issues")) or jobs_degraded() or not isolator_ok
         return {
             "ok": bool(doc.get("ok")) and not degraded,
             "product": settings.product_name,
             "degraded": degraded,
+            "isolator": doc.get("isolator"),
+            "qlib_child": qlib_child,
         }
 
     @app.get("/api/v1/catalog")
