@@ -207,6 +207,75 @@ def test_empty_window_eval_is_not_ok(isolated_home: Path) -> None:
     assert out.error == "empty_or_missing_ic"
 
 
+def test_eval_rejects_invalid_window_and_cost(isolated_home: Path) -> None:
+    bad_window = evaluate(
+        EvalRequest(
+            expression="Rank(Delta(close, 1))",
+            dialect="repro_polars",
+            data_backend="local",
+            universe="local_panel",
+            start="2023-02-10",
+            end="2023-01-03",
+            cost_bps=0,
+        )
+    )
+    assert bad_window.ok is False
+    assert bad_window.error == "invalid_window"
+    bad_cost = evaluate(
+        EvalRequest(
+            expression="Rank(Delta(close, 1))",
+            dialect="repro_polars",
+            data_backend="local",
+            universe="local_panel",
+            start=str(LOCKED_WINDOW["start"]),
+            end=str(LOCKED_WINDOW["end"]),
+            cost_bps=float("nan"),
+        )
+    )
+    assert bad_cost.ok is False
+    assert bad_cost.error == "invalid_cost_bps"
+
+
+def test_uncorrelatable_pool_row_does_not_block_unique_factor(isolated_home: Path) -> None:
+    from aiminer.pool_io import persist_alpha_pool_rows
+    from finaince.settings import get_settings
+
+    settings = get_settings()
+    persist_alpha_pool_rows(
+        settings.aiminer_db,
+        settings.aiminer_results,
+        [
+            {
+                "id": "alpha_short",
+                "hypothesis": "short",
+                "code": "Rank($open)",
+                "ic": 0.08,
+                "returns": {"2020-01-01": 0.01, "2020-01-02": -0.01},
+            }
+        ],
+    )
+    unique = _record(
+        id="fac_unique",
+        daily_returns={f"2024-03-{day:02d}": 0.01 * ((-1) ** day) for day in range(1, 13)},
+        metrics=FactorMetrics(ic=0.07),
+    )
+    gates = evaluate_gates(unique, direction="to_pool")
+    assert "uncorrelatable_returns" not in gates["failures"]
+    assert "correlated" not in gates["failures"]
+
+
+def test_local_panel_stats_are_stable_across_calls() -> None:
+    from finaince.runtime import local_panel_stats, packaged_local_panel
+
+    packed = packaged_local_panel()
+    assert packed is not None
+    first = local_panel_stats(packed)
+    second = local_panel_stats(packed)
+    assert first == second
+    assert first["thin"] is True
+    assert first["n_assets"] >= 1
+
+
 def test_local_panel_is_a_named_universe_not_a_ticker() -> None:
     import inspect
 

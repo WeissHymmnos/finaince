@@ -29,6 +29,20 @@ def _claims_broad_universe(universe: str) -> bool:
     return key in _CSI300_CLAIMS
 
 
+def _finite_returns(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    out: dict[str, float] = {}
+    for key, value in raw.items():
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            continue
+        if num == num and num not in (float("inf"), float("-inf")):
+            out[str(key)] = num
+    return out
+
+
 def evaluate_gates(
     record: FactorRecord,
     *,
@@ -57,7 +71,7 @@ def evaluate_gates(
         failures.append("missing_ic")
     elif direction == "to_pool" and abs(ic) <= 0.005:
         failures.append("ic_threshold")
-    returns = record.daily_returns or {}
+    returns = _finite_returns(record.daily_returns)
     if not returns:
         failures.append("missing_returns")
     else:
@@ -65,22 +79,17 @@ def evaluate_gates(
             from aiminer.manager import _series_correlation
             import pandas as pd
 
-            series = pd.Series({k: float(v) for k, v in returns.items()})
-            # Compare against existing pool if present.
+            series = pd.Series(returns)
             from finaince.settings import get_settings
             from aiminer.pool_io import load_alpha_pool_rows
 
             settings = get_settings()
             for row in load_alpha_pool_rows(settings.aiminer_db):
-                other = row.get("returns") or {}
+                other = _finite_returns(row.get("returns"))
                 if not other:
                     continue
-                oseries = pd.Series({k: float(v) for k, v in other.items()})
-                corr = _series_correlation(series, oseries)
-                if corr is None:
-                    failures.append("uncorrelatable_returns")
-                    break
-                if corr > 0.7:
+                corr = _series_correlation(series, pd.Series(other))
+                if corr is not None and corr > 0.7:
                     failures.append("correlated")
                     break
         except Exception as exc:  # noqa: BLE001
@@ -90,10 +99,12 @@ def evaluate_gates(
                 from finaince.catalog.store import FactorCatalog
 
                 for other in FactorCatalog().list(source="reproduction"):
-                    if other.id == record.id or not other.daily_returns:
+                    if other.id == record.id:
                         continue
-                    oseries = pd.Series({k: float(v) for k, v in other.daily_returns.items()})
-                    corr = _series_correlation(series, oseries)
+                    other_ret = _finite_returns(other.daily_returns)
+                    if not other_ret:
+                        continue
+                    corr = _series_correlation(series, pd.Series(other_ret))
                     if corr is not None and corr > 0.7:
                         failures.append("correlated")
                         break

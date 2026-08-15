@@ -29,20 +29,33 @@ class EvalResult:
     warnings: list[str] = field(default_factory=list)
 
 
+_OPERATORS: set[str] | None = None
+_OPERATORS_MTIME: int | None = None
+
+
 def listed_operators() -> set[str]:
     import re
     from pathlib import Path
 
+    global _OPERATORS, _OPERATORS_MTIME
     path = Path(__file__).with_name("operators.yaml")
     if not path.exists():
         return {"Rank", "Ref", "Delta", "Mean", "Std", "Corr"}
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = None
+    if _OPERATORS is not None and mtime == _OPERATORS_MTIME:
+        return _OPERATORS
     names: set[str] = set()
     for match in re.finditer(r"(?:name|aliases|maps_to):\s*\[?([A-Za-z0-9_, ]+)\]?", path.read_text()):
         for part in match.group(1).split(","):
             token = part.strip()
             if token:
                 names.add(token)
-    return names or {"Rank", "Ref", "Delta", "Mean", "Std", "Corr"}
+    _OPERATORS = names or {"Rank", "Ref", "Delta", "Mean", "Std", "Corr"}
+    _OPERATORS_MTIME = mtime
+    return _OPERATORS
 
 
 def is_listed(expression: str) -> bool:
@@ -94,9 +107,33 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             )
         import os
 
+        from finaince.domain.factor import finite_ic
         from finaince.runtime import default_backtest_window, packaged_local_panel
         from finaince.settings import reproagent_runtime_settings
         from reproagent.reproducer.backtest_bundle import build_backtest_bundle
+
+        if req.start and req.end and req.start > req.end:
+            emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
+            return EvalResult(
+                ok=False,
+                dialect=req.dialect,
+                data_backend=req.data_backend,
+                error="invalid_window",
+                translatable=translatable,
+                alt_text=alt_text,
+            )
+        if req.cost_bps is not None:
+            cost = finite_ic(req.cost_bps)
+            if cost is None or cost < 0 or cost > 10_000:
+                emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
+                return EvalResult(
+                    ok=False,
+                    dialect=req.dialect,
+                    data_backend=req.data_backend,
+                    error="invalid_cost_bps",
+                    translatable=translatable,
+                    alt_text=alt_text,
+                )
 
         packed = packaged_local_panel()
         if packed is not None and not (os.environ.get("FINAINCE_LOCAL_DATA_PATH") or "").strip():
@@ -131,11 +168,21 @@ def _evaluate(req: EvalRequest) -> EvalResult:
         }
         if cost_bps is not None:
             bundle_kwargs["transaction_cost_bps"] = float(cost_bps)
-        bt = build_backtest_bundle(req.expression, **bundle_kwargs)
+        try:
+            bt = build_backtest_bundle(req.expression, **bundle_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            emit("eval_finished", dialect=req.dialect, data_backend=backend, ok=False)
+            return EvalResult(
+                ok=False,
+                dialect=req.dialect,
+                data_backend=backend or settings.data_source,
+                error=f"backtest_failed:{exc}",
+                translatable=translatable,
+                alt_text=alt_text,
+                warnings=warnings,
+            )
         rows = bt.get("rows") or 0
-        ic = bt.get("ic_mean")
-        if isinstance(ic, float) and ic != ic:  # NaN: no IC observations
-            ic = None
+        ic = finite_ic(bt.get("ic_mean"))
         ok = ic is not None and int(rows) > 0
         daily_returns: dict[str, float] = {}
         equity_path = bt.get("equity_curve_path")

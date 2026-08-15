@@ -175,6 +175,9 @@ def resolve_data_source() -> str:
     return "local"
 
 
+_PANEL_STATS_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+
+
 def local_panel_stats(path: Path | None = None) -> dict[str, Any]:
     target = path or local_data_path()
     if target is None:
@@ -183,15 +186,27 @@ def local_panel_stats(path: Path | None = None) -> dict[str, Any]:
     if not parquet.is_file():
         return {"n_assets": 0, "n_days": 0, "thin": True}
     try:
+        st = parquet.stat()
+        key = (str(parquet.resolve()), int(st.st_mtime_ns), int(st.st_size))
+        hit = _PANEL_STATS_CACHE.get(key)
+        if hit is not None:
+            return dict(hit)
         import polars as pl
 
-        df = pl.read_parquet(parquet)
-        code_col = "ts_code" if "ts_code" in df.columns else "instrument"
-        date_col = "trade_date" if "trade_date" in df.columns else "datetime"
-        n_assets = int(df[code_col].n_unique()) if code_col in df.columns else 0
-        n_days = int(df[date_col].n_unique()) if date_col in df.columns else 0
-        thin = n_assets < 50 or n_days < 60
-        return {"n_assets": n_assets, "n_days": n_days, "thin": thin}
+        lf = pl.scan_parquet(parquet)
+        names = lf.collect_schema().names()
+        code_col = "ts_code" if "ts_code" in names else "instrument"
+        date_col = "trade_date" if "trade_date" in names else "datetime"
+        if code_col not in names or date_col not in names:
+            stats = {"n_assets": 0, "n_days": 0, "thin": True}
+        else:
+            n_assets = int(lf.select(pl.col(code_col).n_unique()).collect().item() or 0)
+            n_days = int(lf.select(pl.col(date_col).n_unique()).collect().item() or 0)
+            stats = {"n_assets": n_assets, "n_days": n_days, "thin": n_assets < 50 or n_days < 60}
+        if len(_PANEL_STATS_CACHE) > 8:
+            _PANEL_STATS_CACHE.clear()
+        _PANEL_STATS_CACHE[key] = stats
+        return dict(stats)
     except Exception:
         return {"n_assets": 0, "n_days": 0, "thin": True}
 
