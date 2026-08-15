@@ -26,11 +26,6 @@ def test_sibling_packages_importable() -> None:
 def test_finreportparser_is_finpdfpro_latest() -> None:
     from pathlib import Path
 
-    import pytest
-    from reproagent.parser import layout_extractor
-
-    if not hasattr(layout_extractor, "prefer_latest_finpdfpro"):
-        pytest.skip("prefer_latest_finpdfpro not on this reproagent")
     from reproagent.parser.layout_extractor import prefer_latest_finpdfpro
 
     src = prefer_latest_finpdfpro()
@@ -43,12 +38,7 @@ def test_finreportparser_is_finpdfpro_latest() -> None:
 
 
 def test_layout_extractor_uses_finpdfpro_v05_pipeline(tmp_path) -> None:
-    import pytest
-
-    try:
-        import finreportparser.output  # noqa: F401
-    except ImportError:
-        pytest.skip("finreportparser.output not installed")
+    import finreportparser.output  # noqa: F401
     from datetime import UTC, datetime
     from pathlib import Path
 
@@ -57,18 +47,17 @@ def test_layout_extractor_uses_finpdfpro_v05_pipeline(tmp_path) -> None:
     from reproagent.settings import Settings
 
     docs = Path(__file__).resolve().parents[2]
-    pdf = docs / "finpdfpro" / "tests" / "fixtures" / "broker" / "broker_01.pdf"
-    if not pdf.is_file():
-        pdf = docs / "reproagent" / "tests" / "fixtures" / "sample_reports" / "minimal.pdf"
-    assert pdf.is_file()
+    pdf = docs / "reproagent" / "tests" / "fixtures" / "sample_reports" / "minimal.pdf"
+    assert pdf.is_file(), pdf
     settings = Settings(
         _env_file=None,
         app_env="dev",
         allow_mock_llm=True,
         data_dir=tmp_path / "repro-data",
         parser_backend="finpdfpro",
-        finpdfpro_profile="balanced",
-        finpdfpro_formula_backend="l1",
+        finpdfpro_profile="lite",
+        finpdfpro_formula_backend="l0",
+        finpdfpro_mode="fast",
     )
     report = ResearchReport(
         id="parse-smoke",

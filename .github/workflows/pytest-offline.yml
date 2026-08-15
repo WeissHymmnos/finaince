@@ -25,9 +25,25 @@ jobs:
           ref: finaince-312
           path: aiminer
           persist-credentials: false
+      - name: Checkout public finpdfpro
+        uses: actions/checkout@v4
+        with:
+          repository: WeissHymmnos/finpdfpro
+          path: finpdfpro
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v4
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build workbench SPA
+        working-directory: aiminer/frontend
+        run: |
+          npm install
+          npm run build
+          test -f dist/index.html
+          ls dist/assets | grep -E 'CatalogPage-|ReviewPage-|ReproducePage-|AgentPage-'
       - name: Install public extras and run offline pytest
         working-directory: finaince
         env:
@@ -35,5 +51,7 @@ jobs:
           ALLOW_MOCK_LLM: "true"
         run: |
           uv venv --python 3.12
-          uv pip install -e ".[reproduction,dev]"
-          .venv/bin/python -m pytest tests --ignore=tests/test_live_real.py -q --tb=short
+          uv pip install -e ".[reproduction,dev,agent]"
+          uv pip install -e ../finpdfpro
+          .venv/bin/python -c "import finreportparser; from pathlib import Path; p=Path(finreportparser.__file__); print(finreportparser.__version__, p); assert 'finpdfpro' in str(p) or str(finreportparser.__version__).startswith('0.5')"
+          .venv/bin/python -m pytest tests --ignore=tests/test_live_real.py -m "not live" -q --tb=short

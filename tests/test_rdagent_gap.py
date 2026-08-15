@@ -196,9 +196,6 @@ def test_doctor_reports_isolator_and_qlib_child(isolated_home: Path) -> None:
 
 
 def test_workbench_runs_page_lists_trace() -> None:
-    api = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src" / "lib" / "api.ts"
-    if not api.is_file() or "listTrace" not in api.read_text():
-        pytest.skip("listTrace UI not on this aiminer tree")
     root = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src"
     runs = (root / "pages" / "SwarmRunsPage.tsx").read_text()
     detail = (root / "pages" / "SwarmRunDetailPage.tsx").read_text()

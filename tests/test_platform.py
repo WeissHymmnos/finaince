@@ -221,9 +221,6 @@ def test_named_scorers_are_distinct() -> None:
 
 
 def test_frontend_default_route_is_catalog() -> None:
-    fe = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src"
-    if not (fe / "pages" / "CatalogPage.tsx").is_file():
-        pytest.skip("desk pages not on this aiminer tree")
     from finaince.runtime import documents_root
 
     fe = documents_root() / "aiminer" / "frontend" / "src"
@@ -247,10 +244,6 @@ def test_frontend_default_route_is_catalog() -> None:
 def test_fastmcp_score_factor_is_library_grade_not_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import reproagent.mcp_server as mcp
-
-    if not hasattr(mcp, "library_grade_impl"):
-        pytest.skip("library_grade_impl not on this reproagent")
     from reproagent.mcp_server import library_grade_impl
     from reproagent.settings import get_settings
 
@@ -272,10 +265,6 @@ def test_pandas_to_polars_coerces_nullable_int() -> None:
     import pandas as pd
     import polars as pl
 
-    import reproagent.reproducer.data_loader as data_loader
-
-    if not hasattr(data_loader, "_pandas_to_polars"):
-        pytest.skip("_pandas_to_polars not on this reproagent")
     from reproagent.reproducer.data_loader import _pandas_to_polars
 
     frame = pd.DataFrame(

@@ -30,6 +30,7 @@ dev = [
 reproduction = [
     "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk",
     "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312",
+    "finreportparser @ git+https://github.com/WeissHymmnos/finpdfpro.git",
 ]
 discovery = [
     "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312",

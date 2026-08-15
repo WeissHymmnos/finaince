@@ -63,8 +63,7 @@ def _json_not_html(response) -> dict:
 
 
 def test_layout_nav_maps_to_shipped_page_calls() -> None:
-    if not (FRONTEND / "src" / "pages" / "CatalogPage.tsx").is_file():
-        pytest.skip("desk pages not on this aiminer tree")
+    assert (FRONTEND / "src" / "pages" / "CatalogPage.tsx").is_file()
     layout = (FRONTEND / "src" / "components" / "Layout.tsx").read_text()
     app = (FRONTEND / "src" / "App.tsx").read_text()
     pages = {
@@ -237,8 +236,7 @@ def test_built_desk_chunks_are_same_origin() -> None:
     dist = resolve_workbench_dist()
     assert dist is not None
     index = (dist / "index.html").read_text()
-    if "CatalogPage" not in index and not list(dist.glob("assets/*Catalog*")):
-        pytest.skip("built CatalogPage chunks not in this workbench dist")
+    assert "CatalogPage" in index or list((dist / "assets").glob("*Catalog*")), dist
     for name in ("CatalogPage", "ReviewPage", "ReproducePage", "AgentPage"):
         chunk = next((dist / "assets").glob(f"{name}-*.js"), None)
         assert chunk is not None, name

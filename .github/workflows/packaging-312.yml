@@ -18,4 +18,4 @@ jobs:
         run: |
           uv venv --python 3.12
           uv pip install -e ".[reproduction]"
-          .venv/bin/python -c "import finaince, reproagent; from aiminer.manager import cull_alpha_pool; print('ok', cull_alpha_pool)"
+          .venv/bin/python -c "import finaince, reproagent, finreportparser; from aiminer.manager import cull_alpha_pool; print('ok', cull_alpha_pool, finreportparser.__version__)"

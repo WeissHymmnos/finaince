@@ -55,13 +55,10 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-@pytest.mark.skipif(not MINIMAL_PDF.is_file(), reason="minimal.pdf fixture missing")
 def test_real_cli_reproduce_catalog_eval_promote(tmp_path: Path) -> None:
-    try:
-        import finreportparser.output  # noqa: F401
-    except ImportError:
-        pytest.skip("finreportparser.output not installed")
     """Subprocess the real CLI: reproduce PDF → catalog → eval → promote → fail-closed approve."""
+    import finreportparser.output  # noqa: F401
+    assert MINIMAL_PDF.is_file(), f"missing fixture {MINIMAL_PDF}"
     home = tmp_path / "fa-home"
     home.mkdir()
     pdf = MINIMAL_PDF
@@ -150,14 +147,11 @@ def test_real_cli_reproduce_catalog_eval_promote(tmp_path: Path) -> None:
             assert "missing_returns" in ((approved_body.get("gates") or {}).get("failures") or [])
 
 
-@pytest.mark.skipif(not MINIMAL_PDF.is_file(), reason="minimal.pdf fixture missing")
 def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
     """Same isolated home: CLI reproduce, then live uvicorn + httpx (not TestClient)."""
-    httpx = pytest.importorskip("httpx")
-    try:
-        import finreportparser.output  # noqa: F401
-    except ImportError:
-        pytest.skip("finreportparser.output not installed")
+    import httpx
+    import finreportparser.output  # noqa: F401
+    assert MINIMAL_PDF.is_file(), f"missing fixture {MINIMAL_PDF}"
 
     home = tmp_path / "fa-http"
     home.mkdir()
@@ -237,7 +231,6 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
 
 
 def test_real_cli_sdk_info_has_desk_surface(tmp_path: Path) -> None:
-    pytest.importorskip("claude_agent_sdk")
     home = tmp_path / "fa-home"
     home.mkdir()
     info = _run(home, ["sdk-info"])

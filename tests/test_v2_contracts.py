@@ -137,8 +137,7 @@ def test_serve_index_and_health(isolated_home: Path) -> None:
     assert isinstance(body["degraded"], bool)
     text = _assert_workbench_index(client.get("/"))
     srcs = re.findall(r'(?:src|href)="(/assets/[^"]+)"', text)
-    if not srcs:
-        pytest.skip("packaged workbench has no hashed assets")
+    assert srcs, "workbench index must reference hashed /assets/*"
     asset = client.get(srcs[0])
     assert asset.status_code == 200
     assert len(asset.content) > 100
@@ -220,9 +219,6 @@ def test_http_detail_reject_jobs_qlib(isolated_home: Path) -> None:
 
 
 def test_frontend_review_has_reject_and_job_poll() -> None:
-    pages = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src" / "pages"
-    if not (pages / "CatalogPage.tsx").is_file():
-        pytest.skip("desk pages not on this aiminer tree")
     root = Path(__file__).resolve().parents[2]
     review = (root / "aiminer" / "frontend" / "src" / "pages" / "ReviewPage.tsx").read_text()
     repro = (root / "aiminer" / "frontend" / "src" / "pages" / "ReproducePage.tsx").read_text()
@@ -272,7 +268,6 @@ def test_qlib_placeholder_and_fake_subprocess(isolated_home: Path, monkeypatch, 
 
 
 def test_child_qlib_eval_uses_build_evaluator_run(isolated_home: Path) -> None:
-    pytest.importorskip("rqdatac")
     from finaince.eval.qlib_subprocess import child_qlib_eval
 
     fixture = (
@@ -299,7 +294,6 @@ def test_child_qlib_eval_uses_build_evaluator_run(isolated_home: Path) -> None:
 
 
 def test_run_qlib_eval_spawns_aiminer_child(isolated_home: Path, monkeypatch) -> None:
-    pytest.importorskip("rqdatac")
     import sys
 
     from finaince.eval.qlib_subprocess import aiminer_src, run_qlib_eval
@@ -406,10 +400,6 @@ def test_metrics_jsonl_and_health_degraded(isolated_home: Path) -> None:
 
 def test_rq_cache_roots_follow_finaince_home(isolated_home: Path, monkeypatch) -> None:
     monkeypatch.setenv("FINAINCE_HOME", str(isolated_home))
-    import reproagent.reproducer.data_loader as data_loader
-
-    if not hasattr(data_loader, "_rq_cache_roots"):
-        pytest.skip("_rq_cache_roots not on this reproagent")
     from reproagent.reproducer.data_loader import _rq_cache_roots
 
     prices, instruments = _rq_cache_roots()
@@ -582,10 +572,7 @@ def test_eval_equity_curve_has_ls_returns_on_thin_panel(isolated_home: Path) -> 
 def test_cli_reproduce_writes_catalog_returns(
     isolated_home: Path, sample_report_path: Path
 ) -> None:
-    try:
-        import finreportparser.output  # noqa: F401
-    except ImportError:
-        pytest.skip("finreportparser.output not installed")
+    import finreportparser.output  # noqa: F401
     from typer.testing import CliRunner
 
     from finaince.cli import app
