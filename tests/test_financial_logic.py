@@ -226,6 +226,8 @@ def test_forward_return_is_next_bar_and_cost_is_subtracted() -> None:
     assert "forward_return" in source
     assert "transaction_cost_bps" in source
     assert "turnover" in source
+    assert "effective_groups" in source
+    assert "n_assets" in source
 
 
 def test_baseline_and_cost_still_honest(isolated_home: Path) -> None:
