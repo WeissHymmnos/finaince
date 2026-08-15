@@ -2,6 +2,7 @@ name: packaging-312
 on:
   push:
   pull_request:
+  workflow_dispatch:
 jobs:
   isolated-install:
     runs-on: ubuntu-latest
