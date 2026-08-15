@@ -88,6 +88,7 @@ def test_layout_nav_maps_to_shipped_page_calls() -> None:
     assert "/api/v1/reproduce" in pages["/reproduce"] and "/api/v1/jobs/" in pages["/reproduce"]
     assert "no_factors" in pages["/reproduce"]
     assert "/api/v1/agent" in pages["/agent"] and "ok === false" in pages["/agent"]
+    assert "listTrace" in pages["/runs"] or "/api/v1/trace" in pages["/runs"]
 
 
 def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
@@ -175,6 +176,8 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
         ("GET", "/api/backtest/history"),
         ("GET", "/api/strategy/history"),
         ("GET", "/api/strategies"),
+        ("GET", "/api/v1/trace"),
+        ("GET", "/api/v1/baseline"),
     ):
         got = client.request(method, path)
         assert got.status_code != 404 or got.headers.get("content-type", "").startswith("application/json"), path
@@ -215,6 +218,7 @@ def test_human_nav_when_aiminer_api_missing(isolated_home: Path, monkeypatch) ->
         "/api/v1/catalog",
         "/api/v1/review",
         "/api/v1/health",
+        "/api/v1/trace",
     ):
         _json_not_html(client.get(path))
     for route in ("/runs", "/pool", "/manual", "/strategy", "/wiki", "/ops"):
