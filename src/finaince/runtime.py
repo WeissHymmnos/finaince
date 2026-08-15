@@ -66,7 +66,7 @@ def has_rq_credentials() -> bool:
 
 
 def packaged_local_panel() -> Path | None:
-    """In-tree fixture shipped with the wheel. Thin on purpose; not CSI300."""
+    """In-tree fixture shipped with the wheel (thin local_panel)."""
     here = Path(__file__).resolve().parent / "data" / "local_panel"
     if (here / "prices.parquet").is_file():
         return here

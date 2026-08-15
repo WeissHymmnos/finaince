@@ -1,10 +1,10 @@
 # FinAlpha
 
-Fail-closed research desk for **China sell-side factor work**: catalog a candidate, evaluate it on a locked local panel, promote it only if the gates pass, and reproduce a 研报 without pretending the backtest was CSI300.
+Fail-closed research desk for **China sell-side factor work**: catalog a candidate, evaluate it on a locked local panel, promote it only when the gates pass, and reproduce a 研报 through `reproagent` + `finpdfpro`.
 
 The installable package name is `finaince`. The product name is **FinAlpha**.
 
-This number is **not** CSI300 and **not** the RD-Agent paper ARR. The public research figure is the locked local-panel baseline (`finaince baseline`).
+The public research figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`.
 
 License: [GNU Affero General Public License v3.0](LICENSE).
 
@@ -33,7 +33,7 @@ Bind default for `finaince serve` is `127.0.0.1:8000`.
 
 ## 15-minute path (in-repo fixture)
 
-Uses the shipped thin `local_panel` parquet (not CSI300). Every command below is a real CLI entry.
+Uses the shipped thin `local_panel` parquet. Every command below is a real CLI entry.
 
 ```bash
 # 1. Health
@@ -54,9 +54,7 @@ finaince promote '<catalog_id>' --to to_pool --yes
 finaince review
 ```
 
-Expect the promotion to stay pending or fail-closed if the row is thin, proxied, or missing IC/returns. That is the product. Do not override `thin_panel` to manufacture a CSI300 claim.
-
-`qlib` on the 3.12 slim install is an honest `ok: false` placeholder, not a silent pass.
+Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns. `qlib` on the 3.12 slim install reports `ok: false` until a real 3.10 subprocess is enabled.
 
 ## Public research number
 
@@ -70,13 +68,15 @@ Expect the promotion to stay pending or fail-closed if the row is thin, proxied,
 | expression | `Rank(Delta(close, 1))` |
 | dialect | `repro_polars` |
 
-Two consecutive runs must agree on `ok` and the reported IC/Sharpe (or the same skip). The claim text says it is not CSI300 and not paper ARR.
+Two consecutive runs must agree on `ok` and the reported IC/Sharpe (or the same skip). The claim names the `local_panel` fixture and 0 bps cost.
 
-## What this is / is not
+## Features
 
-**Is:** a researcher desk with catalog, eval, fail-closed promote/review, 研报复现 (`reproagent` + `finpdfpro`), and a citable locked-panel number.
+- Catalog → eval → fail-closed promote/review on one desk
+- 研报复现 via `reproagent` and `finpdfpro` (layout and formulas)
+- Citable locked-window number on the shipped `local_panel`
 
-**Is not:** an RD-Agent plugin, a live broker, a Qlib CSI300 replica, or a claim of the Microsoft R&D-Agent-Quant paper ARR.
+Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity and a declared local-panel baseline. Qlib's public figures use long CSI300 windows; FinAlpha publishes the locked `local_panel` window and 0 bps cost.
 
 ## Tests
 

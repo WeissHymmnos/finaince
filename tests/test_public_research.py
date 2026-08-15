@@ -56,12 +56,11 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "install -e ../aiminer" not in readme
     assert "SIBLING_CHECKOUT_TOKEN" not in readme
     assert "AGPL" in readme or "Affero" in readme
-    assert "not" in readme.lower() and "CSI300" in readme
-    assert "ARR" in readme
+    assert "local_panel" in readme
     assert "finaince baseline" in readme
     assert "finaince impl examples/15min/compute.py" in readme
     assert "WeissHymmnos/finaince" in contributing
-    assert "SIBLING_CHECKOUT_TOKEN" in contributing
+    assert 'uv pip install -e ".[reproduction,dev]"' in contributing
     assert (ROOT / "examples" / "15min" / "compute.py").is_file()
 
 
@@ -74,8 +73,9 @@ def test_locked_baseline_two_runs_agree(isolated_home: Path) -> None:
     assert first["window"]["expression"] == "Rank(Delta(close, 1))"
     assert first["ok"] == second["ok"]
     assert first["claim"] == second["claim"]
-    assert "not CSI300" in first["claim"]
-    assert "ARR" in first["claim"]
+    assert first["claim"] == LOCKED_WINDOW["note"]
+    assert "local_panel" in first["claim"]
+    assert "0 bps" in first["claim"]
     assert first["metrics"].get("ic_mean") == second["metrics"].get("ic_mean")
     assert first["metrics"].get("sharpe_ratio") == second["metrics"].get("sharpe_ratio")
     if first["ok"]:

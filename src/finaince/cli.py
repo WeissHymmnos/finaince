@@ -485,7 +485,7 @@ def impl_cmd(
 
 @app.command("baseline")
 def baseline_cmd() -> None:
-    """Locked local-panel window. Not a CSI300 or paper-ARR claim."""
+    """Locked local-panel window (universe local_panel, 0 bps)."""
     from finaince.baseline import run_locked_baseline
 
     typer.echo(json.dumps(run_locked_baseline(), default=str, ensure_ascii=False, indent=2))

@@ -1,4 +1,4 @@
-"""Locked-window local-panel baseline. Not a CSI300 / paper-ARR claim."""
+"""Locked-window local-panel baseline (universe local_panel, 0 bps)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ LOCKED_WINDOW = {
     "cost_bps": 0,
     "dialect": "repro_polars",
     "expression": "Rank(Delta(close, 1))",
-    "note": "fixture local_panel only; not CSI300 and not RD-Agent paper ARR",
+    "note": "locked local_panel fixture; cost 0 bps",
 }
 
 

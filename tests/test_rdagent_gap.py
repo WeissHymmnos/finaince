@@ -215,9 +215,9 @@ def test_locked_baseline_is_local_panel_not_paper_arr(isolated_home: Path) -> No
 
     out = run_locked_baseline()
     assert out["window"]["universe"] == "local_panel"
-    assert out["window"]["universe"] != "csi300"
-    assert "not CSI300" in out["claim"]
-    assert "ARR" in out["claim"]
+    assert out["claim"] == LOCKED_WINDOW["note"]
+    assert "local_panel" in out["claim"]
+    assert "0 bps" in out["claim"]
     assert out["window"]["start"] == LOCKED_WINDOW["start"]
     assert isinstance(out["ok"], bool)
     if out["ok"]:

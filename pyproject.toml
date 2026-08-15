@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "finaince"
 version = "0.1.0"
-description = "FinAlpha: fail-closed China sell-side research desk (factor catalog + 研报复现). Locked local-panel baseline, not CSI300 / paper ARR."
+description = "FinAlpha: fail-closed China sell-side research desk (factor catalog + 研报复现). Locked local_panel baseline, 0 bps."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"

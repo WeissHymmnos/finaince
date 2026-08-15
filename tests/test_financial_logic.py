@@ -239,8 +239,9 @@ def test_baseline_and_cost_still_honest(isolated_home: Path) -> None:
     assert first["metrics"].get("ic_mean") == second["metrics"].get("ic_mean")
     assert first["metrics"].get("sharpe_ratio") == second["metrics"].get("sharpe_ratio")
     assert first["metrics"].get("universe_claim") == "local_panel"
-    assert "not CSI300" in first["claim"]
-    assert "ARR" in first["claim"]
+    assert first["claim"] == LOCKED_WINDOW["note"]
+    assert "local_panel" in first["claim"]
+    assert "0 bps" in first["claim"]
     zero = evaluate(
         EvalRequest(
             expression=str(LOCKED_WINDOW["expression"]),

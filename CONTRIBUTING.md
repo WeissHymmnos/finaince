@@ -13,9 +13,9 @@ Public repository: https://github.com/WeissHymmnos/finaince
    uv pip install -e ".[reproduction,dev]"
    ```
 
-3. Do not add a private-token checkout, `SIBLING_CHECKOUT_TOKEN`, or a documented install that requires `../reproagent` / `../aiminer` on the author's machine.
-4. Keep promotion fail-closed. Do not weaken `thin_panel`, `formula_proxy`, missing IC, or missing returns so a thin local panel can claim CSI300.
-5. Do not report the RD-Agent paper ARR, or any CSI300 figure, as the public research number. The public number is `finaince baseline` on `local_panel`.
+3. Keep the documented install on public Git extras (`uv pip install -e ".[reproduction]"`). Checkout tokens and author-machine `../reproagent` paths stay out of docs and workflows.
+4. Keep promotion fail-closed: `thin_panel`, `formula_proxy`, missing IC, and missing returns still block a thin panel from a broad-universe claim.
+5. The public research number is `finaince baseline` on `local_panel` (locked window, 0 bps).
 
 ## Checks that must pass
 
