@@ -49,6 +49,7 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "print('ok'" in workflow
     assert "git+https://github.com/WeissHymmnos/ReproAgent.git" in pyproject
     assert "git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in pyproject
+    assert "allow-direct-references" in pyproject
     assert 'path = "../reproagent"' not in pyproject
     assert 'path = "../aiminer"' not in pyproject
     assert "uv pip install -e ../reproagent" not in readme

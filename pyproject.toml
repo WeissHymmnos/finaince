@@ -41,6 +41,9 @@ all = [
     "finaince[reproduction,discovery,agent]",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [project.scripts]
 finaince = "finaince.cli:main"
 
