@@ -14,6 +14,7 @@ class EvalRequest:
     universe: str = "local_panel"
     start: str | None = None
     end: str | None = None
+    cost_bps: float | None = None
 
 
 @dataclass
@@ -119,13 +120,16 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             warnings.append("thin_panel")
             if universe in {"csi300", "hs300", "csi500", "all"}:
                 universe = "local_panel"
-        bt = build_backtest_bundle(
-            req.expression,
-            start_date=start,
-            end_date=end,
-            universe=universe,
-            settings=settings,
-        )
+        cost_bps = req.cost_bps
+        bundle_kwargs: dict[str, Any] = {
+            "start_date": start,
+            "end_date": end,
+            "universe": universe,
+            "settings": settings,
+        }
+        if cost_bps is not None:
+            bundle_kwargs["transaction_cost_bps"] = float(cost_bps)
+        bt = build_backtest_bundle(req.expression, **bundle_kwargs)
         rows = bt.get("rows") or 0
         ic = bt.get("ic_mean")
         ok = ic is not None and int(rows) > 0
@@ -172,6 +176,7 @@ def _evaluate(req: EvalRequest) -> EvalResult:
                 "universe_claim": universe,
                 "alt_text": alt_text,
                 "daily_returns": daily_returns,
+                "transaction_cost_bps": bt.get("transaction_cost_bps"),
             },
             translatable=translatable,
             alt_text=alt_text,

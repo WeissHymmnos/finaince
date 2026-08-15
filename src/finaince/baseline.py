@@ -45,6 +45,7 @@ def run_locked_baseline() -> dict[str, Any]:
                 universe=str(spec["universe"]),
                 start=str(spec["start"]),
                 end=str(spec["end"]),
+                cost_bps=float(spec["cost_bps"]),
             )
         )
     finally:
@@ -63,6 +64,7 @@ def run_locked_baseline() -> dict[str, Any]:
             "sharpe_ratio": metrics.get("sharpe_ratio"),
             "rows": metrics.get("rows"),
             "universe_claim": metrics.get("universe_claim") or spec["universe"],
+            "transaction_cost_bps": metrics.get("transaction_cost_bps"),
         },
         "claim": spec["note"],
     }

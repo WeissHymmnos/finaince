@@ -84,6 +84,56 @@ def test_locked_baseline_two_runs_agree(isolated_home: Path) -> None:
         assert first.get("error") == second.get("error")
 
 
+def test_locked_baseline_applies_zero_bps_not_engine_default(isolated_home: Path) -> None:
+    """The public number must charge 0bps, not BacktestParams' 3.0 default."""
+    import inspect
+
+    from reproagent.models.replication import BacktestParams
+    from reproagent.reproducer.backtest_bundle import build_backtest_bundle
+
+    from finaince.eval.router import EvalRequest, evaluate
+
+    fields = BacktestParams.model_fields
+    assert "transaction_cost_bps" in fields
+    assert float(fields["transaction_cost_bps"].default) == 3.0
+    source = inspect.getsource(build_backtest_bundle)
+    assert "transaction_cost_bps=cost" in source or "transaction_cost_bps=cost," in source
+    assert "transaction_cost_bps" in inspect.signature(build_backtest_bundle).parameters
+
+    out = run_locked_baseline()
+    applied = out["metrics"].get("transaction_cost_bps")
+    assert applied == 0, out
+    assert applied != float(fields["transaction_cost_bps"].default)
+
+    window = dict(LOCKED_WINDOW)
+    zero = evaluate(
+        EvalRequest(
+            expression=str(window["expression"]),
+            dialect=str(window["dialect"]),
+            data_backend="local",
+            universe=str(window["universe"]),
+            start=str(window["start"]),
+            end=str(window["end"]),
+            cost_bps=0,
+        )
+    )
+    three = evaluate(
+        EvalRequest(
+            expression=str(window["expression"]),
+            dialect=str(window["dialect"]),
+            data_backend="local",
+            universe=str(window["universe"]),
+            start=str(window["start"]),
+            end=str(window["end"]),
+            cost_bps=3,
+        )
+    )
+    assert zero.metrics.get("transaction_cost_bps") == 0
+    assert three.metrics.get("transaction_cost_bps") == 3
+    if zero.ok and three.ok:
+        assert zero.metrics.get("sharpe_ratio") != three.metrics.get("sharpe_ratio")
+
+
 def test_promotion_gates_fail_closed_on_shipped_function(isolated_home: Path) -> None:
     proxy = _record(lineage=FactorLineage(source="manual", source_ref="p", formula_proxy=True))
     assert "formula_proxy" in evaluate_gates(proxy, direction="to_pool")["failures"]
