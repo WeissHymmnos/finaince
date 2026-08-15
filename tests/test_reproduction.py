@@ -8,6 +8,12 @@ from finaince.reproduction import reproduce_report, validate_expression
 
 
 def test_reproduce_report_on_minimal_fixture(sample_report_path: Path, offline_settings) -> None:
+    import pytest
+
+    try:
+        import finreportparser.output  # noqa: F401
+    except ImportError:
+        pytest.skip("finreportparser.output not installed")
     import inspect
 
     from reproagent.pipeline import reproduce_report as shipped

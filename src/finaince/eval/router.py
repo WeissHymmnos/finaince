@@ -91,10 +91,17 @@ def _evaluate(req: EvalRequest) -> EvalResult:
                 alt_text=alt_text,
                 warnings=[],
             )
-        from finaince.runtime import default_backtest_window
+        import os
+
+        from finaince.runtime import default_backtest_window, packaged_local_panel
         from finaince.settings import reproagent_runtime_settings
         from reproagent.reproducer.backtest_bundle import build_backtest_bundle
 
+        packed = packaged_local_panel()
+        if packed is not None and not (os.environ.get("FINAINCE_LOCAL_DATA_PATH") or "").strip():
+            os.environ.setdefault("LOCAL_DATA_PATH", str(packed))
+            os.environ.setdefault("FINAINCE_LOCAL_DATA_PATH", str(packed))
+            os.environ.setdefault("AIMINER_LOCAL_DATA_PATH", str(packed))
         settings = reproagent_runtime_settings()
         backend = (req.data_backend or "local").strip().lower()
         if backend == "ricequant":

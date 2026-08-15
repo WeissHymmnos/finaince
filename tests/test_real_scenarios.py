@@ -57,6 +57,10 @@ def _free_port() -> int:
 
 @pytest.mark.skipif(not MINIMAL_PDF.is_file(), reason="minimal.pdf fixture missing")
 def test_real_cli_reproduce_catalog_eval_promote(tmp_path: Path) -> None:
+    try:
+        import finreportparser.output  # noqa: F401
+    except ImportError:
+        pytest.skip("finreportparser.output not installed")
     """Subprocess the real CLI: reproduce PDF → catalog → eval → promote → fail-closed approve."""
     home = tmp_path / "fa-home"
     home.mkdir()
@@ -150,6 +154,10 @@ def test_real_cli_reproduce_catalog_eval_promote(tmp_path: Path) -> None:
 def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
     """Same isolated home: CLI reproduce, then live uvicorn + httpx (not TestClient)."""
     httpx = pytest.importorskip("httpx")
+    try:
+        import finreportparser.output  # noqa: F401
+    except ImportError:
+        pytest.skip("finreportparser.output not installed")
 
     home = tmp_path / "fa-http"
     home.mkdir()
