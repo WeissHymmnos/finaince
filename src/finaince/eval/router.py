@@ -118,7 +118,9 @@ def _evaluate(req: EvalRequest) -> EvalResult:
         warnings: list[str] = []
         if backend == "local" and local_panel_is_thin():
             warnings.append("thin_panel")
-            if universe in {"csi300", "hs300", "csi500", "all"}:
+            from finaince.review.gates import _claims_broad_universe
+
+            if _claims_broad_universe(universe):
                 universe = "local_panel"
         cost_bps = req.cost_bps
         bundle_kwargs: dict[str, Any] = {
@@ -132,6 +134,8 @@ def _evaluate(req: EvalRequest) -> EvalResult:
         bt = build_backtest_bundle(req.expression, **bundle_kwargs)
         rows = bt.get("rows") or 0
         ic = bt.get("ic_mean")
+        if isinstance(ic, float) and ic != ic:  # NaN: no IC observations
+            ic = None
         ok = ic is not None and int(rows) > 0
         daily_returns: dict[str, float] = {}
         equity_path = bt.get("equity_curve_path")
@@ -215,11 +219,9 @@ def _evaluate(req: EvalRequest) -> EvalResult:
                 alt_text=alt_text,
                 error=None if ok else str(payload.get("error") or "qlib_subprocess_failed"),
             )
-        placeholder_ok = os.environ.get("FINAINCE_QLIB_PLACEHOLDER_OK", "").strip() == "1"
-        ok = bool(placeholder_ok and req.expression.strip())
-        emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=ok)
+        emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
         return EvalResult(
-            ok=ok,
+            ok=False,
             dialect=req.dialect,
             data_backend=req.data_backend,
             metrics={
@@ -229,7 +231,7 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             },
             translatable=translatable,
             alt_text=alt_text,
-            error=None if placeholder_ok else "qlib_placeholder",
+            error="qlib_placeholder",
         )
     emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
     return EvalResult(

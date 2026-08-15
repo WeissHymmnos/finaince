@@ -45,10 +45,11 @@ def evaluate_gates(
         try:
             from finaince.runtime import local_panel_is_thin
 
-            if local_panel_is_thin():
-                failures.append("thin_panel")
+            thin = local_panel_is_thin()
         except Exception:
-            pass
+            thin = True
+        if thin:
+            failures.append("thin_panel")
     if record.metrics.ic is None:
         failures.append("missing_ic")
     else:
