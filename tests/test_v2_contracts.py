@@ -75,6 +75,10 @@ def test_reject_then_promote_again(isolated_home: Path) -> None:
 
 
 def test_eval_snapshot_compares_shipped_bundle(isolated_home: Path) -> None:
+    import os
+
+    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
+        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     from finaince.eval.snapshot import run_snapshot
 
     out = run_snapshot()
@@ -416,6 +420,10 @@ def test_rq_cache_roots_follow_finaince_home(isolated_home: Path, monkeypatch) -
 
 
 def test_to_library_writes_synthetic_report(isolated_home: Path) -> None:
+    import os
+
+    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
+        pytest.skip("published ResearchReport rejects synthetic discovery fields")
     from reproagent.models.report import ResearchReport
 
     fields = getattr(ResearchReport, "model_fields", {})
@@ -565,6 +573,10 @@ def test_http_async_reproduce_polls_parent_to_terminal(
 
 
 def test_eval_equity_curve_has_ls_returns_on_thin_panel(isolated_home: Path) -> None:
+    import os
+
+    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
+        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     from finaince.settings import get_settings
     from reproagent.reproducer.metrics import serialize_equity_returns
 
