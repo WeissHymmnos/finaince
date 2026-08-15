@@ -9,34 +9,13 @@ jobs:
     steps:
       - name: Checkout finaince
         uses: actions/checkout@v4
-        with:
-          path: pack/finaince
-      - name: Checkout reproagent
-        uses: actions/checkout@v4
-        with:
-          repository: WeissHymmnos/ReproAgent
-          ref: main
-          path: pack/reproagent
-          persist-credentials: false
-          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
-      - name: Checkout aiminer
-        uses: actions/checkout@v4
-        with:
-          repository: WeissHymmnos/aiminer
-          ref: finaince-312
-          path: pack/aiminer
-          persist-credentials: false
-          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
       - uses: astral-sh/setup-uv@v4
         with:
           python-version: "3.12"
-      - name: Install extras without path hack
-        working-directory: pack/finaince
+      - name: Public install extras without path hack
         env:
           FINAINCE_NO_PATH_HACK: "1"
         run: |
-          test -d ../reproagent
-          test -d ../aiminer
           uv venv --python 3.12
-          uv pip install -e ../reproagent -e ../aiminer -e ".[reproduction]"
-          .venv/bin/python -c "import reproagent, finaince; from aiminer.manager import cull_alpha_pool; print('ok', cull_alpha_pool)"
+          uv pip install -e ".[reproduction]"
+          .venv/bin/python -c "import finaince, reproagent; from aiminer.manager import cull_alpha_pool; print('ok', cull_alpha_pool)"

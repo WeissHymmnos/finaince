@@ -229,6 +229,7 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
 
 
 def test_real_cli_sdk_info_has_desk_surface(tmp_path: Path) -> None:
+    pytest.importorskip("claude_agent_sdk")
     home = tmp_path / "fa-home"
     home.mkdir()
     info = _run(home, ["sdk-info"])

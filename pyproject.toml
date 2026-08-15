@@ -5,12 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "finaince"
 version = "0.1.0"
-description = "Unified factor discovery (aiminer) and 研报复现 (reproagent) surface, plus Claude Agent SDK custom tools."
+description = "FinAlpha: fail-closed China sell-side research desk (factor catalog + 研报复现). Locked local-panel baseline, not CSI300 / paper ARR."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
-    "claude-agent-sdk>=0.1.0",
     "typer>=0.12",
     "pandas",
     "numpy",
@@ -29,19 +28,18 @@ dev = [
     "pytest>=8.0",
 ]
 reproduction = [
-    "reproagent",
-    "aiminer",
+    "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@main",
+    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312",
 ]
 discovery = [
-    "aiminer",
+    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312",
+]
+agent = [
+    "claude-agent-sdk>=0.1.0",
 ]
 all = [
-    "finaince[reproduction,discovery]",
+    "finaince[reproduction,discovery,agent]",
 ]
-
-[tool.uv.sources]
-reproagent = { path = "../reproagent", editable = true }
-aiminer = { path = "../aiminer", editable = true }
 
 [project.scripts]
 finaince = "finaince.cli:main"
@@ -51,6 +49,9 @@ packages = ["src/finaince"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src/finaince" = "finaince"
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/finaince/data/local_panel/prices.parquet" = "finaince/data/local_panel/prices.parquet"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

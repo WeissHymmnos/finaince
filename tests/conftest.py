@@ -17,15 +17,33 @@ def _offline_unless_live(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
         monkeypatch.delenv("FINAINCE_ALLOW_MOCK_LLM", raising=False)
         return
     monkeypatch.setenv("ALLOW_MOCK_LLM", "true")
-    fixture = Path(__file__).resolve().parents[2] / "reproagent" / "tests" / "fixtures" / "test_data"
-    if (fixture / "prices.parquet").is_file():
+    from finaince.runtime import packaged_local_panel
+
+    packed = packaged_local_panel()
+    sibling = Path(__file__).resolve().parents[2] / "reproagent" / "tests" / "fixtures" / "test_data"
+    fixture = packed if packed is not None else sibling
+    if fixture is not None and (Path(fixture) / "prices.parquet").is_file():
         monkeypatch.setenv("LOCAL_DATA_PATH", str(fixture))
         monkeypatch.setenv("FINAINCE_DATA_SOURCE", "local")
 
 
 REPROAGENT_ROOT = Path(__file__).resolve().parents[2] / "reproagent"
+AIMINER_FRONTEND = Path(__file__).resolve().parents[2] / "aiminer" / "frontend"
 MINIMAL_PDF = REPROAGENT_ROOT / "tests" / "fixtures" / "sample_reports" / "minimal.pdf"
 LOCAL_DATA = REPROAGENT_ROOT / "tests" / "fixtures" / "test_data"
+
+
+def desk_frontend_pages_present() -> bool:
+    pages = AIMINER_FRONTEND / "src" / "pages"
+    return all(
+        (pages / name).is_file()
+        for name in ("CatalogPage.tsx", "ReviewPage.tsx", "ReproducePage.tsx", "AgentPage.tsx")
+    )
+
+
+def aiminer_trace_ui_present() -> bool:
+    api = AIMINER_FRONTEND / "src" / "lib" / "api.ts"
+    return api.is_file() and "listTrace" in api.read_text()
 
 
 @pytest.fixture()

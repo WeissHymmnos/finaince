@@ -1,0 +1,39 @@
+name: pytest-offline
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout finaince
+        uses: actions/checkout@v4
+        with:
+          path: finaince
+      - name: Checkout public ReproAgent
+        uses: actions/checkout@v4
+        with:
+          repository: WeissHymmnos/ReproAgent
+          ref: main
+          path: reproagent
+          persist-credentials: false
+      - name: Checkout public slim aiminer
+        uses: actions/checkout@v4
+        with:
+          repository: WeissHymmnos/aiminer
+          ref: finaince-312
+          path: aiminer
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+      - name: Install public extras and run offline pytest
+        working-directory: finaince
+        env:
+          FINAINCE_NO_PATH_HACK: "1"
+          ALLOW_MOCK_LLM: "true"
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[reproduction,dev]"
+          .venv/bin/python -m pytest tests --ignore=tests/test_live_real.py -q --tb=short

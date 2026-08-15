@@ -65,6 +65,14 @@ def has_rq_credentials() -> bool:
     return bool(token or (user and password))
 
 
+def packaged_local_panel() -> Path | None:
+    """In-tree fixture shipped with the wheel. Thin on purpose; not CSI300."""
+    here = Path(__file__).resolve().parent / "data" / "local_panel"
+    if (here / "prices.parquet").is_file():
+        return here
+    return None
+
+
 def local_data_path() -> Path | None:
     for key in ("FINAINCE_LOCAL_DATA_PATH", "LOCAL_DATA_PATH"):
         raw = (os.getenv(key) or "").strip()
@@ -72,7 +80,7 @@ def local_data_path() -> Path | None:
             return Path(raw).expanduser()
     if (DEFAULT_LOCAL_DATA / "prices.parquet").is_file():
         return DEFAULT_LOCAL_DATA
-    return None
+    return packaged_local_panel()
 
 
 def pdf_root() -> Path:

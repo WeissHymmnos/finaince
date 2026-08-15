@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("claude_agent_sdk")
+
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from finaince.sdk_ext import (

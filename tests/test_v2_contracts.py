@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from finaince.catalog.hooks import accept_library_entry
@@ -216,6 +217,9 @@ def test_http_detail_reject_jobs_qlib(isolated_home: Path) -> None:
 
 
 def test_frontend_review_has_reject_and_job_poll() -> None:
+    pages = Path(__file__).resolve().parents[2] / "aiminer" / "frontend" / "src" / "pages"
+    if not (pages / "CatalogPage.tsx").is_file():
+        pytest.skip("desk pages not on this aiminer tree")
     root = Path(__file__).resolve().parents[2]
     review = (root / "aiminer" / "frontend" / "src" / "pages" / "ReviewPage.tsx").read_text()
     repro = (root / "aiminer" / "frontend" / "src" / "pages" / "ReproducePage.tsx").read_text()

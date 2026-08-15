@@ -1,75 +1,91 @@
-# FinAlpha (`finaince`)
+# FinAlpha
 
-Single installable surface for **aiminer** factor discovery (Manager-SubAgent swarm, IC/correlation pool cull) and **reproagent** 研报复现 (ingest → reproduce/backtest → deviation self-heal → library).
+Fail-closed research desk for **China sell-side factor work**: catalog a candidate, evaluate it on a locked local panel, promote it only if the gates pass, and reproduce a 研报 without pretending the backtest was CSI300.
 
-Claude Code / Claude Agent SDK custom system extensions live in `finaince.sdk_ext`: in-process MCP tools (`@tool` + `create_sdk_mcp_server`) call the real discovery and reproduction functions, and a PreToolUse hook is registered on `ClaudeAgentOptions`.
+The installable package name is `finaince`. The product name is **FinAlpha**.
 
-## Install
+This number is **not** CSI300 and **not** the RD-Agent paper ARR. The public research figure is the locked local-panel baseline (`finaince baseline`).
 
-Python **3.12** is the platform + reproduction path:
+License: [GNU Affero General Public License v3.0](LICENSE).
 
-```bash
-uv venv --python 3.12 .venv
-uv pip install -e ../reproagent -e ".[reproduction]"
-```
+## Public install (Python 3.12)
 
-Full aiminer swarm (LangGraph / qlib / RiceQuant) stays on the **3.10** conda extra stack:
+You only need this public repository. Engines resolve from public GitHub (`WeissHymmnos/ReproAgent` @ `main`, `WeissHymmnos/aiminer` @ `finaince-312`). No private token, no author `Documents/` layout, no `../reproagent` checkout.
 
 ```bash
-conda env create -f ../aiminer/environment.yml
-conda activate aiminer
-pip install -e ../aiminer[all]
-```
-
-Do not expect `pip install aiminer` (no extras) to pull qlib or langgraph.
-
-## One-shot go-live (Topology A, Python 3.12)
-
-```bash
+git clone https://github.com/WeissHymmnos/finaince.git
+cd finaince
 uv venv --python 3.12 .venv
 source .venv/bin/activate
-uv pip install -e ../reproagent -e ".[reproduction]"
-finaince doctor          # exit 0 only when the report's ok is true
-finaince serve           # http://127.0.0.1:8000 — workbench + /api/v1
+uv pip install -e ".[reproduction]"
+finaince doctor
 ```
 
-Open `http://127.0.0.1:8000`. `aiminer.api` may fail to import on 3.12 slim (no `psutil` / `web` extra / `PortfolioManager`); the same process still serves `/` (built workbench) and `/api/v1/*`.
+`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install (CI sets `FINAINCE_NO_PATH_HACK=1` so the path fallback is off).
 
-`finaince doctor` prints JSON with `ok`, `home` (`FINAINCE_HOME`), `imports` (`finaince` / `aiminer` / `reproagent`), `path_hack`, and `issues`. Process exit is 0 only when `ok` is true.
+Optional extras:
 
-## Commands
+- `.[agent]` — Claude Agent SDK research desk
+- `.[dev]` — pytest
+- `.[all]` — reproduction + discovery + agent
 
-```text
-finaince discover --demo|--cull-json|--swarm [--sync]
-finaince reproduce PATH [--sync]
-finaince catalog / eval / promote / review / jobs / doctor / serve / agent
-finaince validate / library / sdk-info
+Bind default for `finaince serve` is `127.0.0.1:8000`.
 
-`finaince agent "复现这份研报并判断能否晋升"` 启动 Claude Agent SDK 研究台：
-系统提示 + 发现/复现/复核三个 specialist + 目录/求值/晋升等进程内工具。
-需要本机 `claude` CLI 或凭证；没有时会返回环境失败，不会编造回测。
+## 15-minute path (in-repo fixture)
+
+Uses the shipped thin `local_panel` parquet (not CSI300). Every command below is a real CLI entry.
+
+```bash
+# 1. Health
+finaince doctor
+
+# 2. Public research number (locked window / universe / cost / expression)
+finaince baseline
+
+# 3. Same expression through the eval router
+finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
+
+# 4. Isolated compute(panel) on the fixture → catalog row
+finaince impl examples/15min/compute.py --name rank_delta --universe local_panel
+
+# 5. Promote → review (fail-closed: thin_panel / formula_proxy / missing IC / missing returns)
+#    Copy catalog_id from the impl JSON, then:
+finaince promote '<catalog_id>' --to to_pool --yes
+finaince review
 ```
 
-Existing `aiminer` and `reproagent` CLIs are unchanged. This package imports both trees and dispatches to them.
+Expect the promotion to stay pending or fail-closed if the row is thin, proxied, or missing IC/returns. That is the product. Do not override `thin_panel` to manufacture a CSI300 claim.
+
+`qlib` on the 3.12 slim install is an honest `ok: false` placeholder, not a silent pass.
+
+## Public research number
+
+`finaince baseline` (and `run_locked_baseline()`) lock:
+
+| Field | Value |
+|---|---|
+| window | 2023-01-03 → 2023-02-10 |
+| universe | `local_panel` |
+| cost | 0 bps |
+| expression | `Rank(Delta(close, 1))` |
+| dialect | `repro_polars` |
+
+Two consecutive runs must agree on `ok` and the reported IC/Sharpe (or the same skip). The claim text says it is not CSI300 and not paper ARR.
+
+## What this is / is not
+
+**Is:** a researcher desk with catalog, eval, fail-closed promote/review, 研报复现 (`reproagent` + `finpdfpro`), and a citable locked-panel number.
+
+**Is not:** an RD-Agent plugin, a live broker, a Qlib CSI300 replica, or a claim of the Microsoft R&D-Agent-Quant paper ARR.
 
 ## Tests
 
 ```bash
-# Offline (no network): CLI / catalog / eval / review / doctor / SDK
 python -m pytest tests --ignore=tests/test_live_real.py
-
-# Live: CPA DeepSeek, RiceQuant, and the three pinned categorized PDFs
-# (skipped when credentials or files are missing)
-python -m pytest -m live
 ```
 
-## Layout
+Live PDF / RiceQuant / CPA DeepSeek tests stay opt-in (`pytest -m live`) and are skipped without credentials.
 
-- `finaince.discovery` — `score_factor`, `cull_factor_pool`, `run_swarm`
-- `finaince.reproduction` — `reproduce_report`, `validate_expression`, `search_library`
-- `finaince.sdk_ext` — custom tools, PreToolUse hook, `build_claude_agent_options`
-- `finaince.cli` — unified entry (`python -m finaince`)
+## Contribute
 
-## License
-
-GNU Affero General Public License v3.0 (`LICENSE`). Same family as `aiminer`.
+See [CONTRIBUTING.md](CONTRIBUTING.md).

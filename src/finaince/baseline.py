@@ -17,19 +17,42 @@ LOCKED_WINDOW = {
 
 def run_locked_baseline() -> dict[str, Any]:
     """Evaluate the locked expression on the shipped local fixture window."""
+    import os
+
     from finaince.eval.router import EvalRequest, evaluate
+    from finaince.runtime import packaged_local_panel
 
     spec = dict(LOCKED_WINDOW)
-    result = evaluate(
-        EvalRequest(
-            expression=str(spec["expression"]),
-            dialect=str(spec["dialect"]),
-            data_backend="local",
-            universe=str(spec["universe"]),
-            start=str(spec["start"]),
-            end=str(spec["end"]),
+    packed = packaged_local_panel()
+    if packed is None:
+        return {
+            "ok": False,
+            "window": spec,
+            "error": "missing_packaged_panel",
+            "metrics": {"ic_mean": None, "sharpe_ratio": None, "rows": None, "universe_claim": spec["universe"]},
+            "claim": spec["note"],
+        }
+    keys = ("LOCAL_DATA_PATH", "FINAINCE_LOCAL_DATA_PATH", "AIMINER_LOCAL_DATA_PATH")
+    previous = {key: os.environ.get(key) for key in keys}
+    for key in keys:
+        os.environ[key] = str(packed)
+    try:
+        result = evaluate(
+            EvalRequest(
+                expression=str(spec["expression"]),
+                dialect=str(spec["dialect"]),
+                data_backend="local",
+                universe=str(spec["universe"]),
+                start=str(spec["start"]),
+                end=str(spec["end"]),
+            )
         )
-    )
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
     metrics = dict(result.metrics or {})
     return {
         "ok": bool(result.ok),

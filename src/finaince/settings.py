@@ -101,7 +101,12 @@ def get_settings() -> FinainceSettings:
 
 
 def sibling_fixture_data() -> Path | None:
-    """Bundled reproagent local parquet used for offline backtests."""
+    """Local parquet for offline backtests: packaged first, then sibling tree."""
+    from finaince.runtime import packaged_local_panel
+
+    packed = packaged_local_panel()
+    if packed is not None:
+        return packed
     here = Path(__file__).resolve()
     for parent in here.parents:
         cand = parent / "reproagent" / "tests" / "fixtures" / "test_data"
