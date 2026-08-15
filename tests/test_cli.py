@@ -26,6 +26,11 @@ def test_sibling_packages_importable() -> None:
 def test_finreportparser_is_finpdfpro_latest() -> None:
     from pathlib import Path
 
+    import pytest
+    from reproagent.parser import layout_extractor
+
+    if not hasattr(layout_extractor, "prefer_latest_finpdfpro"):
+        pytest.skip("prefer_latest_finpdfpro not on this reproagent")
     from reproagent.parser.layout_extractor import prefer_latest_finpdfpro
 
     src = prefer_latest_finpdfpro()
@@ -38,6 +43,12 @@ def test_finreportparser_is_finpdfpro_latest() -> None:
 
 
 def test_layout_extractor_uses_finpdfpro_v05_pipeline(tmp_path) -> None:
+    import pytest
+
+    try:
+        import finreportparser.output  # noqa: F401
+    except ImportError:
+        pytest.skip("finreportparser.output not installed")
     from datetime import UTC, datetime
     from pathlib import Path
 

@@ -47,7 +47,7 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "FINAINCE_NO_PATH_HACK" in workflow
     assert "from aiminer.manager import cull_alpha_pool" in workflow
     assert "print('ok'" in workflow
-    assert "git+https://github.com/WeissHymmnos/ReproAgent.git" in pyproject
+    assert "git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk" in pyproject
     assert "git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in pyproject
     assert "allow-direct-references" in pyproject
     assert 'path = "../reproagent"' not in pyproject

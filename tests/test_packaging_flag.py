@@ -18,7 +18,7 @@ def test_path_hack_kill_switch(monkeypatch) -> None:
 def test_reproduction_extra_lists_both_engines() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("pyproject.toml").read_text()
     assert 'reproduction = [' in text
-    assert "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git" in text
+    assert "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk" in text
     assert "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in text
     assert "FINAINCE_NO_PATH_HACK" in Path(__file__).resolve().parents[1].joinpath(
         "src/finaince/_paths.py"
@@ -37,5 +37,5 @@ def test_packaging_312_uses_public_git_extras() -> None:
     assert "uv pip install -e \".[reproduction]\"" in workflow
     assert "from aiminer.manager import cull_alpha_pool" in workflow
     assert "print('ok'" in workflow
-    assert "git+https://github.com/WeissHymmnos/ReproAgent.git" in pyproject
+    assert "git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk" in pyproject
     assert "git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in pyproject

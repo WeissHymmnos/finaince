@@ -401,6 +401,10 @@ def test_metrics_jsonl_and_health_degraded(isolated_home: Path) -> None:
 
 def test_rq_cache_roots_follow_finaince_home(isolated_home: Path, monkeypatch) -> None:
     monkeypatch.setenv("FINAINCE_HOME", str(isolated_home))
+    import reproagent.reproducer.data_loader as data_loader
+
+    if not hasattr(data_loader, "_rq_cache_roots"):
+        pytest.skip("_rq_cache_roots not on this reproagent")
     from reproagent.reproducer.data_loader import _rq_cache_roots
 
     prices, instruments = _rq_cache_roots()

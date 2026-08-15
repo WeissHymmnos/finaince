@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: WeissHymmnos/ReproAgent
-          ref: main
+          ref: finaince-desk
           path: reproagent
           persist-credentials: false
       - name: Checkout public slim aiminer

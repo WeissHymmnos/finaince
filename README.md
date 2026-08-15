@@ -10,7 +10,7 @@ License: [GNU Affero General Public License v3.0](LICENSE).
 
 ## Public install (Python 3.12)
 
-You only need this public repository. Engines resolve from public GitHub (`WeissHymmnos/ReproAgent` @ `main`, `WeissHymmnos/aiminer` @ `finaince-312`). No private token, no author `Documents/` layout, no `../reproagent` checkout.
+You only need this public repository. Engines resolve from public GitHub (`WeissHymmnos/ReproAgent` @ `finaince-desk`, `WeissHymmnos/aiminer` @ `finaince-312`). No private token, no author `Documents/` layout, no `../reproagent` checkout.
 
 ```bash
 git clone https://github.com/WeissHymmnos/finaince.git

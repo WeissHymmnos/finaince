@@ -14,6 +14,7 @@ def resolve_workbench_dist() -> Path | None:
 
     root = documents_root()
     here = Path(__file__).resolve()
+    packaged = here.parent / "web"
     candidates: list[Path] = [
         Path("frontend_dist"),
         Path("frontend/dist"),
@@ -27,6 +28,7 @@ def resolve_workbench_dist() -> Path | None:
         candidates.append(base / "aiminer" / "frontend_dist")
         candidates.append(base / "frontend" / "dist")
         candidates.append(base / "frontend_dist")
+    candidates.append(packaged)
     seen: set[Path] = set()
     for cand in candidates:
         try:
