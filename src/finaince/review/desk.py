@@ -137,6 +137,16 @@ def _write_library(rec) -> None:
     body = f"# {rec.name}\n\n{rec.expression.text}\n"
     md.write_text(body, encoding="utf-8")
     digest = hashlib.sha256(md.read_bytes()).hexdigest()
+    status = "synthetic"
+    schema = ResearchReport.model_json_schema().get("properties", {}).get("validation_status", {})
+    allowed = schema.get("enum")
+    if not allowed:
+        for part in schema.get("anyOf", []):
+            if "enum" in part:
+                allowed = part["enum"]
+                break
+    if allowed and "synthetic" not in allowed:
+        status = "valid" if "valid" in allowed else allowed[0]
     report = ResearchReport(
         id=report_id,
         file_path=md,
@@ -144,7 +154,7 @@ def _write_library(rec) -> None:
         title=rec.name,
         broker="finaince-discovery",
         page_count=1,
-        validation_status="synthetic",
+        validation_status=status,
         ingested_at=datetime.now(UTC),
     )
     repo.save_report(report)

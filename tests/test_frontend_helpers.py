@@ -157,8 +157,6 @@ def test_workbench_aiminer_routes_do_not_404(isolated_home: Path) -> None:
 def test_workbench_mutations_round_trip(isolated_home: Path) -> None:
     import os
 
-    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
-        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     from fastapi.testclient import TestClient
 
     from finaince.serve import create_app

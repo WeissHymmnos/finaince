@@ -207,6 +207,15 @@ def test_empty_window_eval_is_not_ok(isolated_home: Path) -> None:
     assert out.error == "empty_or_missing_ic"
 
 
+def test_local_panel_is_a_named_universe_not_a_ticker() -> None:
+    import inspect
+
+    from reproagent.reproducer.data_loader import DataLoader
+
+    source = inspect.getsource(DataLoader._load_local_price)
+    assert '"local_panel"' in source
+
+
 def test_forward_return_is_next_bar_and_cost_is_subtracted() -> None:
     import inspect
 

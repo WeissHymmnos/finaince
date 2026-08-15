@@ -296,8 +296,6 @@ def test_pandas_to_polars_coerces_nullable_int() -> None:
 def test_eval_router_repro_polars(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
-    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
-        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     from finaince.eval.router import EvalRequest, evaluate
     from reproagent.settings import get_settings
 
@@ -482,8 +480,6 @@ def test_eval_cli_returns_numeric_metrics(
 ) -> None:
     import os
 
-    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
-        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     from reproagent.settings import get_settings
 
     fixture = Path(__file__).resolve().parents[2] / "reproagent" / "tests" / "fixtures" / "test_data"

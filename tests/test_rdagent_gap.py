@@ -130,8 +130,6 @@ def test_empty_extract_stays_no_factors_described_needs_impl(isolated_home: Path
 def test_loop_alternates_factor_and_model(isolated_home: Path) -> None:
     import os
 
-    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
-        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     assert choose_next_action([]) == "factor"
     assert choose_next_action([{"action": "factor", "ok": True, "metrics": {"return_points": 8}}]) == "model"
     assert choose_next_action([{"action": "factor", "ok": False, "metrics": {}}]) == "factor"
@@ -166,8 +164,6 @@ def test_loop_alternates_factor_and_model(isolated_home: Path) -> None:
 def test_http_loop_and_impl(isolated_home: Path) -> None:
     import os
 
-    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
-        pytest.skip("published PolarsEngine is empty on the thin shipped panel")
     import finaince.serve as serve_mod
 
     serve_mod.app = None
