@@ -50,11 +50,13 @@ def evaluate_gates(
             thin = True
         if thin:
             failures.append("thin_panel")
-    if record.metrics.ic is None:
+    from finaince.domain.factor import finite_ic
+
+    ic = finite_ic(record.metrics.ic)
+    if ic is None:
         failures.append("missing_ic")
-    else:
-        if direction == "to_pool" and abs(float(record.metrics.ic)) <= 0.005:
-            failures.append("ic_threshold")
+    elif direction == "to_pool" and abs(ic) <= 0.005:
+        failures.append("ic_threshold")
     returns = record.daily_returns or {}
     if not returns:
         failures.append("missing_returns")

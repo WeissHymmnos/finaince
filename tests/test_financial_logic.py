@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from finaince.baseline import LOCKED_WINDOW, run_locked_baseline
 from finaince.domain.factor import (
@@ -31,6 +32,63 @@ def _record(**kwargs: object) -> FactorRecord:
     }
     payload.update(kwargs)
     return FactorRecord(**payload)
+
+
+def test_nan_ic_is_missing_not_a_present_score(isolated_home: Path) -> None:
+    """NaN must be missing_ic. Old gates used abs(NaN)<=0.005 which is False."""
+    from finaince.catalog.store import FactorCatalog
+    from finaince.domain.adapters import from_library_entry
+    from finaince.settings import get_settings
+    from aiminer.pool_io import load_alpha_pool_rows
+
+    nan_rec = _record(id="fac_nan_ic", metrics=FactorMetrics(ic=float("nan")))
+    gates = evaluate_gates(nan_rec, direction="to_pool")
+    assert gates["passed"] is False
+    assert "missing_ic" in gates["failures"]
+
+    inf_rec = _record(id="fac_inf_ic", metrics=FactorMetrics(ic=float("inf")))
+    inf_gates = evaluate_gates(inf_rec, direction="to_pool")
+    assert inf_gates["passed"] is False
+    assert "missing_ic" in inf_gates["failures"]
+
+    class _F:
+        name = "nan_lib"
+        name_cn = "nan"
+        style = "momentum"
+        formula = "Rank(Delta(close, 1))"
+        input_fields = ["close"]
+        universe = "local_panel"
+        rebalance_frequency = "daily"
+        spec_id = "spec-nan"
+
+    class _E:
+        id = "lib-nan-ic"
+        report_id = "rep-nan"
+        factor = _F()
+
+    stored = from_library_entry(
+        _E(),
+        extras={
+            "metrics": {"ic_mean": float("nan")},
+            "daily_returns": {f"2024-03-{day:02d}": 0.01 for day in range(1, 13)},
+            "observability": {},
+        },
+    )
+    assert stored.metrics.ic is None
+    FactorCatalog().upsert(stored)
+    loaded = FactorCatalog().get(stored.id)
+    assert loaded is not None
+    assert loaded.metrics.ic is None
+    loaded_gates = evaluate_gates(loaded, direction="to_pool")
+    assert "missing_ic" in loaded_gates["failures"]
+
+    before = list(load_alpha_pool_rows(get_settings().aiminer_db))
+    promo = promote(stored.id, direction="to_pool")
+    denied = approve(promo["promotion_id"])
+    assert denied["ok"] is False
+    assert "missing_ic" in ((denied.get("gates") or {}).get("failures") or [])
+    after = list(load_alpha_pool_rows(get_settings().aiminer_db))
+    assert after == before
 
 
 def test_gates_reject_ic_threshold_and_correlated(isolated_home: Path) -> None:

@@ -12,6 +12,7 @@ from finaince.domain.factor import (
     FactorLineage,
     FactorMetrics,
     FactorRecord,
+    finite_ic,
 )
 
 
@@ -65,7 +66,7 @@ def from_aiminer_dict(item: dict[str, Any], *, engine_db: str | None = None) -> 
         market_profile=str(item.get("market_profile") or "cn_stock"),
         rebalance_frequency="daily",
         metrics=FactorMetrics(
-            ic=float(ic) if ic is not None else None,
+            ic=finite_ic(ic),
             rank_ic=item.get("rank_ic") or metrics_src.get("rank_ic"),
             selection_score=item.get("selection_score"),
             extra=dict(metrics_src),
@@ -136,7 +137,7 @@ def from_library_entry(entry: Any, *, extras: dict[str, Any] | None = None) -> F
     factor = entry.factor
     metrics_src = extras.get("metrics") or {}
     obs = extras.get("observability") or {}
-    ic = metrics_src.get("ic_mean")
+    ic = finite_ic(metrics_src.get("ic_mean"))
     factor_name = str(getattr(factor, "name", "") or "")
     try:
         from finaince.eval.dialects import attach_translation
@@ -168,7 +169,7 @@ def from_library_entry(entry: Any, *, extras: dict[str, Any] | None = None) -> F
         universe=universe,
         rebalance_frequency=factor.rebalance_frequency,
         metrics=FactorMetrics(
-            ic=float(ic) if ic is not None else None,
+            ic=ic,
             sharpe=metrics_src.get("sharpe_ratio"),
             max_drawdown=metrics_src.get("max_drawdown"),
             extra=dict(metrics_src),

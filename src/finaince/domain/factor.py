@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+def finite_ic(value: Any) -> float | None:
+    """Return a finite IC, or None if missing / NaN / Inf."""
+    if value is None:
+        return None
+    try:
+        ic = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(ic):
+        return None
+    return ic
 
 Dialect = Literal["qlib", "repro_polars", "python_sandbox"]
 Source = Literal["discovery", "reproduction", "manual"]
