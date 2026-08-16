@@ -189,7 +189,7 @@ def test_approve_reproduction_to_pool_writes_nonempty_code(isolated_home: Path) 
     submitted = promote(rec.id, direction="to_pool")
     assert submitted["ok"] is True
     assert submitted["status"] == "review"
-    result = approve(submitted["promotion_id"])
+    result = approve(submitted["promotion_id"], override=["thin_panel"])
     assert result["ok"] is True, result
     assert result["status"] == "ready"
 

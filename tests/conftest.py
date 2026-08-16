@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
+# Local pytest uses sibling trees unless CI set FINAINCE_NO_PATH_HACK=1.
+os.environ.setdefault("FINAINCE_PATH_HACK", "1")
+
 from finaince._paths import ensure_import_paths
 
 ensure_import_paths()
+
+DESK_TOKEN = "desk-test-token"
+
+
+def desk_headers() -> dict[str, str]:
+    token = os.environ.get("FINAINCE_DESK_TOKEN") or DESK_TOKEN
+    return {"Authorization": f"Bearer {token}", "X-API-Key": token}
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +36,10 @@ def _offline_unless_live(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     if fixture is not None and (Path(fixture) / "prices.parquet").is_file():
         monkeypatch.setenv("LOCAL_DATA_PATH", str(fixture))
         monkeypatch.setenv("FINAINCE_DATA_SOURCE", "local")
+    monkeypatch.setenv("FINAINCE_DESK_TOKEN", DESK_TOKEN)
+    pdf_root = Path(__file__).resolve().parents[2] / "reproagent" / "tests" / "fixtures" / "sample_reports"
+    if pdf_root.is_dir():
+        monkeypatch.setenv("FINAINCE_PDF_ROOT", str(pdf_root))
 
 
 REPROAGENT_ROOT = Path(__file__).resolve().parents[2] / "reproagent"

@@ -14,8 +14,8 @@ Public repository: https://github.com/WeissHymmnos/finaince
    ```
 
 3. Keep the documented install on public Git extras (`uv pip install -e ".[reproduction]"`). Checkout tokens and author-machine `../reproagent` paths stay out of docs and workflows.
-4. Keep promotion fail-closed: `thin_panel`, `formula_proxy`, missing IC, and missing returns still block a thin panel from a broad-universe claim.
-5. The public research number is `finaince baseline` on `local_panel` (locked window, 0 bps).
+4. Keep promotion fail-closed: `thin_panel` (any universe when the loaded panel has fewer than 20 assets), `formula_proxy`, missing IC, and missing returns.
+5. The install-smoke baseline is `finaince baseline` on `local_panel` (locked window, 0 bps). It is not a wide-universe research sample.
 
 ## Checks that must pass
 

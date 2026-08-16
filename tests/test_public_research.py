@@ -47,8 +47,10 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "FINAINCE_NO_PATH_HACK" in workflow
     assert "from aiminer.manager import cull_alpha_pool" in workflow
     assert "print('ok'" in workflow
-    assert "git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk" in pyproject
-    assert "git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in pyproject
+    assert "18702585ed19f50c85c9dd9b023ebff2a09a56f7" in pyproject
+    assert "1b79d7be16647ae9bff423258ba08d4f0121ebd1" in pyproject
+    assert "@finaince-desk" not in pyproject
+    assert "@finaince-312" not in pyproject
     assert "allow-direct-references" in pyproject
     assert 'path = "../reproagent"' not in pyproject
     assert 'path = "../aiminer"' not in pyproject
@@ -76,6 +78,9 @@ def test_locked_baseline_two_runs_agree(isolated_home: Path) -> None:
     assert first["claim"] == LOCKED_WINDOW["note"]
     assert "local_panel" in first["claim"]
     assert "0 bps" in first["claim"]
+    assert "smoke" in first["claim"].lower()
+    assert "research number" not in first["claim"].lower()
+    assert "citable" not in first["claim"].lower()
     assert first["metrics"].get("ic_mean") == second["metrics"].get("ic_mean")
     assert first["metrics"].get("sharpe_ratio") == second["metrics"].get("sharpe_ratio")
     if first["ok"]:

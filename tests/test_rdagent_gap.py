@@ -13,6 +13,7 @@ from finaince.isolate import child_isolate, run_isolated, similar_errors, upsert
 from finaince.loop import choose_next_action, run_loop, train_linear_head
 from finaince.review.gates import evaluate_gates
 from finaince.serve import create_app
+from tests.conftest import desk_headers
 from finaince.trace import list_chain
 
 
@@ -45,9 +46,17 @@ def test_http_trace_after_two_desk_actions(isolated_home: Path) -> None:
 
     serve_mod.app = None
     client = TestClient(create_app())
-    ev1 = client.post("/api/v1/eval", json={"expression": "Rank(Delta(close, 1))", "dialect": "repro_polars"})
+    ev1 = client.post(
+        "/api/v1/eval",
+        json={"expression": "Rank(Delta(close, 1))", "dialect": "repro_polars"},
+        headers=desk_headers(),
+    )
     assert ev1.status_code == 200
-    ev2 = client.post("/api/v1/eval", json={"expression": "Rank($close)", "dialect": "qlib"})
+    ev2 = client.post(
+        "/api/v1/eval",
+        json={"expression": "Rank($close)", "dialect": "qlib"},
+        headers=desk_headers(),
+    )
     assert ev2.status_code == 200
     assert ev2.json()["ok"] is False
     listed = client.get("/api/v1/trace")
@@ -64,7 +73,8 @@ def test_isolated_impl_fail_then_success_and_gates(isolated_home: Path) -> None:
     assert pip.get("ok") is False
     child = child_isolate({"source": GOOD_SRC})
     assert child.get("ok") is True, child
-    assert child.get("daily_returns")
+    assert child.get("daily_returns") in ({}, None)
+    assert not any(str(k).startswith("2024-01-") for k in (child.get("daily_returns") or {}))
     stored = upsert_isolated(child, universe="csi300")
     assert stored.get("ok") is True
     cid = stored["catalog_id"]
@@ -72,12 +82,14 @@ def test_isolated_impl_fail_then_success_and_gates(isolated_home: Path) -> None:
 
     rec = FactorCatalog().get(cid)
     assert rec is not None
+    assert rec.is_simulated is True
+    assert rec.daily_returns == {}
     gates = evaluate_gates(rec, direction="to_pool")
     assert "thin_panel" in gates["failures"]
     rec.universe = "local_panel"
     FactorCatalog().upsert(rec)
     local = evaluate_gates(FactorCatalog().get(cid), direction="to_pool")
-    assert "thin_panel" not in local["failures"]
+    assert "thin_panel" in local["failures"]
     via = run_isolated(GOOD_SRC, name="iso_via_child")
     assert via.get("ok") is True or via.get("skipped") is True
     if via.get("skipped"):
@@ -168,13 +180,17 @@ def test_http_loop_and_impl(isolated_home: Path) -> None:
 
     serve_mod.app = None
     client = TestClient(create_app())
-    looped = client.post("/api/v1/loop", json={"steps": 2})
+    looped = client.post("/api/v1/loop", json={"steps": 2}, headers=desk_headers())
     assert looped.status_code == 200
     body = looped.json()
     result = body.get("result") if isinstance(body.get("result"), dict) else body
     actions = result.get("actions") or []
     assert "factor" in actions and "model" in actions
-    posted = client.post("/api/v1/impl", json={"source": GOOD_SRC, "name": "http_iso"})
+    posted = client.post(
+        "/api/v1/impl",
+        json={"source": GOOD_SRC, "name": "http_iso"},
+        headers=desk_headers(),
+    )
     assert posted.status_code == 200
     impl = posted.json()
     inner = impl.get("result") if isinstance(impl.get("result"), dict) else impl
@@ -215,6 +231,8 @@ def test_locked_baseline_is_local_panel_not_paper_arr(isolated_home: Path) -> No
     assert out["claim"] == LOCKED_WINDOW["note"]
     assert "local_panel" in out["claim"]
     assert "0 bps" in out["claim"]
+    assert "research number" not in out["claim"].lower()
+    assert "citable" not in out["claim"].lower()
     assert out["window"]["start"] == LOCKED_WINDOW["start"]
     assert isinstance(out["ok"], bool)
     if out["ok"]:

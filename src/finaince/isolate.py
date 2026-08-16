@@ -51,6 +51,9 @@ def isolator_available() -> dict[str, Any]:
     return {"ok": True, "via": "subprocess", "python": str(py)}
 
 
+_FORBIDDEN_SOURCE = ("open(", "eval(", "exec(", "compile(", "__import__(")
+
+
 def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
     """Shipped child: exec user source against a tiny panel. Tests must call this."""
     source = str(req.get("source") or "")
@@ -59,6 +62,8 @@ def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
     lowered = source.lower()
     if "pip install" in lowered or "pip.main" in lowered:
         return {"ok": False, "error": "pip_forbidden"}
+    if any(token in source for token in _FORBIDDEN_SOURCE):
+        return {"ok": False, "error": "forbidden_builtin"}
     panel = req.get("panel") or default_panel()
     ns: dict[str, Any] = {"__name__": "isolated_factor", "panel": panel, "__builtins__": _frozen_builtins()}
     try:
@@ -71,14 +76,14 @@ def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": str(values["error"])}
     if not isinstance(values, list) or len(values) < 3:
         return {"ok": False, "error": "compute_must_return_numeric_list"}
-    returns = {f"2024-01-{i:02d}": float(v) for i, v in enumerate(values, start=1)}
-    ic = _naive_ic(values)
     return {
         "ok": True,
         "name": str(ns.get("NAME") or req.get("name") or "isolated"),
-        "daily_returns": returns,
-        "ic": ic,
+        "expression": str(ns.get("EXPRESSION") or req.get("expression") or "").strip() or None,
+        "values": values,
         "n": len(values),
+        "daily_returns": {},
+        "ic": None,
     }
 
 
@@ -89,9 +94,58 @@ def _frozen_import(name: str, *args: Any, **kwargs: Any):
     return __import__(name, *args, **kwargs)
 
 
+_SAFE_BUILTIN_NAMES = (
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "dict",
+    "enumerate",
+    "filter",
+    "float",
+    "frozenset",
+    "int",
+    "isinstance",
+    "iter",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "next",
+    "range",
+    "reversed",
+    "round",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
+    "Exception",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "IndexError",
+    "ZeroDivisionError",
+)
+
+
+def _deny_builtin(name: str):
+    def _blocked(*_a: Any, **_k: Any) -> None:
+        raise PermissionError(f"{name} is not allowed in isolator")
+
+    _blocked.__name__ = name
+    return _blocked
+
+
 def _frozen_builtins() -> dict[str, Any]:
-    safe = dict(__builtins__) if isinstance(__builtins__, dict) else dict(vars(__builtins__))
+    root = __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
+    safe: dict[str, Any] = {name: root[name] for name in _SAFE_BUILTIN_NAMES if name in root}
     safe["__import__"] = _frozen_import
+    safe["__build_class__"] = root["__build_class__"]
+    safe["__name__"] = "isolated_factor"
+    for banned in ("open", "eval", "exec", "compile", "input", "breakpoint"):
+        safe[banned] = _deny_builtin(banned)
     return safe
 
 
@@ -180,7 +234,7 @@ def _remember_isolate(result: dict[str, Any], *, name: str) -> dict[str, Any]:
 
 
 def upsert_isolated(result: dict[str, Any], *, universe: str = "local_panel") -> dict[str, Any]:
-    """Catalog upsert for a successful isolated impl. Gates stay fail-closed on the row."""
+    """Catalog upsert after isolate. IC/returns come from shipped eval, not list indices."""
     from datetime import UTC, datetime
 
     from finaince.catalog.store import FactorCatalog
@@ -189,22 +243,44 @@ def upsert_isolated(result: dict[str, Any], *, universe: str = "local_panel") ->
         FactorLineage,
         FactorMetrics,
         FactorRecord,
+        finite_ic,
     )
 
     if not result.get("ok"):
         return {"ok": False, "error": result.get("error") or "isolate_failed"}
     now = datetime.now(UTC)
     source_ref = f"iso_{abs(hash(result.get('name'))) % 10**10}"
+    expression = str(result.get("expression") or "").strip()
+    ic = None
+    returns: dict[str, float] = {}
+    simulated = True
+    if expression:
+        from finaince.eval.router import EvalRequest, evaluate
+
+        ev = evaluate(
+            EvalRequest(expression=expression, dialect="repro_polars", universe=universe)
+        )
+        if ev.ok:
+            ic = finite_ic((ev.metrics or {}).get("ic_mean"))
+            raw = (ev.metrics or {}).get("daily_returns") or {}
+            if isinstance(raw, dict):
+                returns = {str(k): float(v) for k, v in raw.items()}
+            simulated = False
     rec = FactorRecord(
         id=f"fac_{source_ref}",
         name=str(result.get("name") or "isolated"),
-        expression=FactorExpression(dialect="python_sandbox", text="compute(panel)", validated=True),
+        expression=FactorExpression(
+            dialect="repro_polars" if expression else "python_sandbox",
+            text=expression or "compute(panel)",
+            validated=bool(expression),
+        ),
         universe=universe,
-        metrics=FactorMetrics(ic=result.get("ic")),
-        daily_returns=dict(result.get("daily_returns") or {}),
+        metrics=FactorMetrics(ic=ic),
+        daily_returns=returns,
         status="candidate",
         lineage=FactorLineage(source="manual", source_ref=source_ref, engine_db="isolate"),
         tags=["isolated", "python_sandbox"],
+        is_simulated=simulated,
         created_at=now,
         updated_at=now,
     )

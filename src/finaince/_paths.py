@@ -21,7 +21,16 @@ _FINPDFPRO_SRC = _DOCS / "finpdfpro" / "src"
 
 
 def path_hack_disabled() -> bool:
-    return os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1"
+    """Sibling src injection is off unless the operator opts in.
+
+    ``FINAINCE_PATH_HACK=1`` enables the author-tree fallback.
+    ``FINAINCE_NO_PATH_HACK=1`` keeps the historical kill switch (still off).
+    """
+    if os.environ.get("FINAINCE_NO_PATH_HACK", "").strip() == "1":
+        return True
+    if os.environ.get("FINAINCE_PATH_HACK", "").strip() == "1":
+        return False
+    return True
 
 
 def ensure_import_paths() -> list[str]:

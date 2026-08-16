@@ -11,6 +11,7 @@ import pytest
 from finaince.catalog.hooks import accept_library_entry
 from finaince.catalog.store import FactorCatalog
 from finaince.serve import create_app
+from tests.conftest import desk_headers
 
 
 FRONTEND = Path(__file__).resolve().parents[2] / "aiminer" / "frontend"
@@ -127,7 +128,11 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
     assert detail["id"] == rec.id
 
     promoted = _json_not_html(
-        client.post("/api/v1/promote", json={"catalog_id": rec.id, "direction": "to_pool"})
+        client.post(
+            "/api/v1/promote",
+            json={"catalog_id": rec.id, "direction": "to_pool"},
+            headers=desk_headers(),
+        )
     )
     assert promoted["ok"] is True
     assert promoted.get("promotion_id")
@@ -137,25 +142,37 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
     pending = next(item for item in queue["items"] if item["id"] == promoted["promotion_id"])
     assert "gates" in pending
 
-    rejected = _json_not_html(client.post(f"/api/v1/review/{promoted['promotion_id']}/reject"))
+    rejected = _json_not_html(
+        client.post(
+            f"/api/v1/review/{promoted['promotion_id']}/reject",
+            headers=desk_headers(),
+        )
+    )
     assert rejected["ok"] is True
 
     again = _json_not_html(
-        client.post("/api/v1/promote", json={"catalog_id": rec.id, "direction": "to_pool"})
+        client.post(
+            "/api/v1/promote",
+            json={"catalog_id": rec.id, "direction": "to_pool"},
+            headers=desk_headers(),
+        )
     )
     assert again["ok"] is True
     assert again["promotion_id"] != promoted["promotion_id"]
 
-    approved = _json_not_html(
-        client.post(
-            f"/api/v1/review/{again['promotion_id']}/approve",
-            json={"override": ["thin_panel"]},
-        )
+    approved = client.post(
+        f"/api/v1/review/{again['promotion_id']}/approve",
+        json={"override": ["thin_panel"]},
+        headers=desk_headers(),
     )
-    assert approved.get("ok") is True or approved.get("error")
+    assert approved.status_code == 403
 
     qlib = _json_not_html(
-        client.post("/api/v1/eval", json={"expression": "Rank($close)", "dialect": "qlib"})
+        client.post(
+            "/api/v1/eval",
+            json={"expression": "Rank($close)", "dialect": "qlib"},
+            headers=desk_headers(),
+        )
     )
     assert qlib["ok"] is False
 
@@ -163,6 +180,7 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
         client.post(
             "/api/v1/reproduce",
             json={"pdf_path": str(sample_report_path), "sync": False},
+            headers=desk_headers(),
         )
     )
     job_id = job.get("id")

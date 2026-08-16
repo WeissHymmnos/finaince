@@ -165,7 +165,7 @@ def test_thin_panel_fail_closed_when_panel_check_errors(
         raise RuntimeError("panel unreadable")
 
     monkeypatch.setattr("finaince.runtime.local_panel_is_thin", boom)
-    rec = _record(universe="csi300")
+    rec = _record(universe="local_panel")
     gates = evaluate_gates(rec, direction="to_pool")
     assert gates["passed"] is False
     assert "thin_panel" in gates["failures"]

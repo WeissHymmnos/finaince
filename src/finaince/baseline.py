@@ -11,7 +11,7 @@ LOCKED_WINDOW = {
     "cost_bps": 0,
     "dialect": "repro_polars",
     "expression": "Rank(Delta(close, 1))",
-    "note": "locked local_panel fixture; cost 0 bps",
+    "note": "install smoke local_panel fixture; cost 0 bps",
 }
 
 

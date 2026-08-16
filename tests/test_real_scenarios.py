@@ -192,10 +192,13 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
         assert cat_body["count"] >= 1
         assert any(item["lineage"]["source"] == "reproduction" for item in cat_body["items"])
 
+        from tests.conftest import desk_headers
+
         ev = httpx.post(
             f"{base}/api/v1/eval",
             json={"expression": "Rank(Delta(close, 1))", "dialect": "repro_polars"},
             timeout=30.0,
+            headers=desk_headers(),
         )
         assert ev.status_code == 200
         ev_body = ev.json()
@@ -215,12 +218,15 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
         assert queue.status_code == 200
         assert any(item["id"] == pid for item in queue.json()["items"])
 
-        approve = httpx.post(f"{base}/api/v1/review/{pid}/approve", timeout=10.0)
+        approve = httpx.post(
+            f"{base}/api/v1/review/{pid}/approve",
+            timeout=10.0,
+            headers=desk_headers(),
+        )
         assert approve.status_code == 200
         denied = approve.json()
-        if not rec.get("daily_returns"):
-            assert denied.get("ok") is False
-            assert denied.get("error") in {"gates_failed", "empty_returns"}
+        assert denied.get("ok") is False
+        assert denied.get("error") in {"gates_failed", "empty_returns"}
     finally:
         proc.terminate()
         try:

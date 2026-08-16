@@ -90,6 +90,15 @@ class FinainceSettings(BaseSettings):
             pass
 
 
+def _parser_profile() -> str:
+    raw = (os.environ.get("FINAINCE_FINPDFPRO_PROFILE") or "").strip().lower()
+    if raw in {"lite", "balanced", "quality"}:
+        return raw
+    if raw == "fast":
+        return "lite"
+    return "lite"
+
+
 def get_settings() -> FinainceSettings:
     load_engine_dotenv()
     cfg = FinainceSettings()
@@ -133,8 +142,9 @@ def reproagent_runtime_settings():
             llm_api_key="",
             llm_base_url=None,
             parser_backend="finpdfpro",
-            finpdfpro_profile="balanced",
-            finpdfpro_formula_backend="l1",
+            finpdfpro_profile=_parser_profile(),
+            finpdfpro_formula_backend="l1" if _parser_profile() != "lite" else "l0",
+            finpdfpro_mode="fast" if _parser_profile() == "lite" else "balanced",
             data_source="local",
             local_data_path=local,
             data_dir=cfg.repro_data_dir,
@@ -153,8 +163,9 @@ def reproagent_runtime_settings():
         llm_base_url=llm["base_url"],
         llm_model=llm["model"],
         parser_backend="finpdfpro",
-        finpdfpro_profile="balanced",
-        finpdfpro_formula_backend="l1",
+        finpdfpro_profile=_parser_profile(),
+        finpdfpro_formula_backend="l1" if _parser_profile() != "lite" else "l0",
+        finpdfpro_mode="fast" if _parser_profile() == "lite" else "balanced",
         data_source=data_source,  # type: ignore[arg-type]
         local_data_path=local,
         data_dir=cfg.repro_data_dir,

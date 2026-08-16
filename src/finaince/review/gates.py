@@ -55,11 +55,14 @@ def evaluate_gates(
         failures.append("simulated")
     if record.lineage.formula_proxy:
         failures.append("formula_proxy")
-    if "thin_panel" not in skipped and _claims_broad_universe(record.universe):
+    if "thin_panel" not in skipped:
         try:
-            from finaince.runtime import local_panel_is_thin
+            from finaince.runtime import local_panel_is_thin, local_panel_stats
 
-            thin = local_panel_is_thin()
+            stats = local_panel_stats()
+            thin = bool(stats.get("thin")) or int(stats.get("n_assets") or 0) < 20
+            if not thin:
+                thin = local_panel_is_thin()
         except Exception:
             thin = True
         if thin:

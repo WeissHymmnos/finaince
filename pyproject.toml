@@ -28,12 +28,12 @@ dev = [
     "pytest>=8.0",
 ]
 reproduction = [
-    "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk",
-    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312",
-    "finreportparser @ git+https://github.com/WeissHymmnos/finpdfpro.git",
+    "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@18702585ed19f50c85c9dd9b023ebff2a09a56f7",
+    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@1b79d7be16647ae9bff423258ba08d4f0121ebd1",
+    "finreportparser @ git+https://github.com/WeissHymmnos/finpdfpro.git@fb5314833a816d40201fb1173a6afe6788dfba2c",
 ]
 discovery = [
-    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312",
+    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@1b79d7be16647ae9bff423258ba08d4f0121ebd1",
 ]
 agent = [
     "claude-agent-sdk>=0.1.0",

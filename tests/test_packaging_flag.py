@@ -9,6 +9,10 @@ from finaince._paths import ensure_import_paths, path_hack_disabled
 
 def test_path_hack_kill_switch(monkeypatch) -> None:
     monkeypatch.delenv("FINAINCE_NO_PATH_HACK", raising=False)
+    monkeypatch.delenv("FINAINCE_PATH_HACK", raising=False)
+    assert path_hack_disabled() is True
+    assert ensure_import_paths() == []
+    monkeypatch.setenv("FINAINCE_PATH_HACK", "1")
     assert path_hack_disabled() is False
     monkeypatch.setenv("FINAINCE_NO_PATH_HACK", "1")
     assert path_hack_disabled() is True
@@ -18,8 +22,9 @@ def test_path_hack_kill_switch(monkeypatch) -> None:
 def test_reproduction_extra_lists_both_engines() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("pyproject.toml").read_text()
     assert 'reproduction = [' in text
-    assert "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk" in text
-    assert "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in text
+    assert "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@" in text
+    assert "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@" in text
+    assert "finaince-desk" not in text.split("reproduction = [", 1)[-1].split("]", 1)[0] or "@18702585" in text
     assert "FINAINCE_NO_PATH_HACK" in Path(__file__).resolve().parents[1].joinpath(
         "src/finaince/_paths.py"
     ).read_text()
@@ -37,5 +42,6 @@ def test_packaging_312_uses_public_git_extras() -> None:
     assert "uv pip install -e \".[reproduction]\"" in workflow
     assert "from aiminer.manager import cull_alpha_pool" in workflow
     assert "print('ok'" in workflow
-    assert "git+https://github.com/WeissHymmnos/ReproAgent.git@finaince-desk" in pyproject
-    assert "git+https://github.com/WeissHymmnos/aiminer.git@finaince-312" in pyproject
+    assert "18702585ed19f50c85c9dd9b023ebff2a09a56f7" in pyproject
+    assert "1b79d7be16647ae9bff423258ba08d4f0121ebd1" in pyproject
+    assert "fb5314833a816d40201fb1173a6afe6788dfba2c" in pyproject

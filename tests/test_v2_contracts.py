@@ -13,6 +13,7 @@ from finaince.eval.router import EvalRequest, evaluate
 from finaince.review.desk import approve, promote, reject
 from finaince.serve import create_app
 from finaince.tools import handle_search_library
+from tests.conftest import desk_headers
 
 
 def _entry(name: str = "v2_mom", style: str = "momentum"):
@@ -91,7 +92,7 @@ def test_qlib_placeholder_is_not_ok(isolated_home: Path) -> None:
     assert out.error == "qlib_placeholder"
 
 
-def test_thin_panel_gate_only_on_csi300_claim(isolated_home: Path) -> None:
+def test_thin_panel_gate_fires_on_smoke_panel_regardless_of_universe(isolated_home: Path) -> None:
     from finaince.review.gates import evaluate_gates
 
     returns = {f"2024-03-{d:02d}": 0.01 for d in range(1, 13)}
@@ -109,7 +110,7 @@ def test_thin_panel_gate_only_on_csi300_claim(isolated_home: Path) -> None:
     rec.universe = "local_panel"
     FactorCatalog().upsert(rec)
     local = evaluate_gates(rec, direction="to_pool")
-    assert "thin_panel" not in local["failures"]
+    assert "thin_panel" in local["failures"]
 
 
 def _assert_workbench_index(response) -> str:
@@ -188,28 +189,44 @@ def test_http_detail_reject_jobs_qlib(isolated_home: Path) -> None:
 
     serve_mod.app = None
     client = TestClient(create_app())
-    posted = client.post("/api/v1/promote", json={"catalog_id": rec.id, "direction": "to_pool"})
+    posted = client.post(
+        "/api/v1/promote",
+        json={"catalog_id": rec.id, "direction": "to_pool"},
+        headers=desk_headers(),
+    )
     assert posted.status_code == 200
     promo = posted.json()
     assert promo["ok"] is True
     detail = client.get(f"/api/v1/catalog/{rec.id}")
     assert detail.status_code == 200
     assert detail.json()["id"] == rec.id
-    qlib = client.post("/api/v1/eval", json={"expression": "Rank($close)", "dialect": "qlib"})
+    qlib = client.post(
+        "/api/v1/eval",
+        json={"expression": "Rank($close)", "dialect": "qlib"},
+        headers=desk_headers(),
+    )
     assert qlib.status_code == 200
     assert qlib.json()["ok"] is False
-    rejected = client.post(f"/api/v1/review/{promo['promotion_id']}/reject")
+    rejected = client.post(
+        f"/api/v1/review/{promo['promotion_id']}/reject",
+        headers=desk_headers(),
+    )
     assert rejected.status_code == 200
     assert rejected.json()["ok"] is True
     after = FactorCatalog().get(rec.id)
     assert after is not None and after.status == "candidate"
-    again = client.post("/api/v1/promote", json={"catalog_id": rec.id, "direction": "to_pool"})
+    again = client.post(
+        "/api/v1/promote",
+        json={"catalog_id": rec.id, "direction": "to_pool"},
+        headers=desk_headers(),
+    )
     assert again.status_code == 200 and again.json()["ok"] is True
     approved = client.post(
         f"/api/v1/review/{again.json()['promotion_id']}/approve",
         json={"override": ["thin_panel"]},
+        headers=desk_headers(),
     )
-    assert approved.status_code == 200
+    assert approved.status_code == 403
     from finaince.jobs.runner import submit
 
     job = submit("evaluate", {"expr": "x"}, run=lambda: {"ok": True})
@@ -427,7 +444,7 @@ def test_to_library_writes_synthetic_report(isolated_home: Path) -> None:
     rec = next(r for r in FactorCatalog().list(source="discovery") if r.name == "disc_synth")
     promo = promote(rec.id, direction="to_library")
     assert promo["ok"] is True
-    result = approve(promo["promotion_id"])
+    result = approve(promo["promotion_id"], override=["thin_panel"])
     assert result["ok"] is True, result
     after = FactorCatalog().get(rec.id)
     assert after is not None
@@ -528,6 +545,7 @@ def test_http_async_reproduce_polls_parent_to_terminal(
     posted = client.post(
         "/api/v1/reproduce",
         json={"pdf_path": str(sample_report_path), "sync": False},
+        headers=desk_headers(),
     )
     assert posted.status_code == 200
     body = posted.json()

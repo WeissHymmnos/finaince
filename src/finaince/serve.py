@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from fastapi import Request
+
 from finaince.settings import get_settings
 
 
@@ -119,6 +121,12 @@ def create_app() -> Any:
 
     os.environ["AIMINER_INCLUDE_SPA"] = "1" if settings.serve_spa else "0"
     app = FastAPI(title=settings.product_name, version="0.1.0")
+
+    def _require_desk(request: Request) -> None:
+        from finaince.auth import desk_auth_ok
+
+        if not desk_auth_ok(dict(request.headers)):
+            raise HTTPException(status_code=401, detail="desk token required")
     from fastapi.middleware.cors import CORSMiddleware
 
     app.add_middleware(
@@ -168,7 +176,8 @@ def create_app() -> Any:
         return body
 
     @app.post("/api/v1/promote")
-    def promote_route(body: dict[str, Any]) -> dict[str, Any]:
+    def promote_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.review.desk import promote
 
         cid = str(body.get("catalog_id") or "")
@@ -200,7 +209,8 @@ def create_app() -> Any:
         return {"items": rows, "count": len(rows)}
 
     @app.post("/api/v1/eval")
-    def eval_route(body: dict[str, Any]) -> dict[str, Any]:
+    def eval_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.eval.router import EvalRequest, evaluate
 
         from finaince.runtime import resolve_data_source
@@ -234,36 +244,47 @@ def create_app() -> Any:
         return {"items": FactorCatalog().list_promotions("pending")}
 
     @app.post("/api/v1/review/{promotion_id}/approve")
-    def review_approve(promotion_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def review_approve(
+        request: Request, promotion_id: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.review.desk import approve
 
-        override = list((body or {}).get("override") or [])
-        return approve(promotion_id, override=override)
+        if (body or {}).get("override"):
+            raise HTTPException(status_code=403, detail="http approve cannot honor override")
+        return approve(promotion_id, override=None)
 
     @app.post("/api/v1/review/{promotion_id}/reject")
-    def review_reject(promotion_id: str) -> dict[str, Any]:
+    def review_reject(request: Request, promotion_id: str) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.review.desk import reject
 
         return reject(promotion_id)
 
     @app.post("/api/v1/reproduce")
-    def reproduce_route(body: dict[str, Any]) -> dict[str, Any]:
+    def reproduce_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+        _require_desk(request)
+        from finaince.auth import pdf_path_allowed
         from finaince.jobs.runner import run_reproduce_job
 
         pdf = body.get("pdf_path")
         if not pdf:
             raise HTTPException(400, "pdf_path required")
+        if not pdf_path_allowed(str(pdf)):
+            raise HTTPException(status_code=403, detail="pdf_path must be under FINAINCE_PDF_ROOT")
         sync = bool(body.get("sync", True))
         return run_reproduce_job(str(pdf), sync=sync)
 
     @app.post("/api/v1/jobs/{job_id}/cancel")
-    def cancel_job(job_id: str) -> dict[str, Any]:
+    def cancel_job(request: Request, job_id: str) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.jobs.runner import cancel
 
         return cancel(job_id)
 
     @app.post("/api/v1/agent")
-    def agent_route(body: dict[str, Any]) -> dict[str, Any]:
+    def agent_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.agent import run_research_desk
 
         prompt = str(body.get("prompt") or "").strip()
@@ -285,7 +306,8 @@ def create_app() -> Any:
         return run_locked_baseline()
 
     @app.post("/api/v1/impl")
-    def impl_route(body: dict[str, Any]) -> dict[str, Any]:
+    def impl_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.jobs.runner import run_impl_job
 
         source = str(body.get("source") or "")
@@ -294,13 +316,15 @@ def create_app() -> Any:
         return run_impl_job(source, name=str(body.get("name") or "isolated"), universe=str(body.get("universe") or "local_panel"))
 
     @app.post("/api/v1/impl/needs")
-    def impl_needs_route(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def impl_needs_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.impl_status import fulfill_needs_impl
 
         return fulfill_needs_impl(body or {})
 
     @app.post("/api/v1/loop")
-    def loop_route(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def loop_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.jobs.runner import run_loop_job
 
         steps = int((body or {}).get("steps") or 2)

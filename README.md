@@ -4,13 +4,13 @@ Fail-closed research desk for **China sell-side factor work**: catalog a candida
 
 The installable package name is `finaince`. The product name is **FinAlpha**.
 
-The public research figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`.
+The install smoke figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`. It is a two-name fixture, not a wide-universe research sample.
 
 License: [GNU Affero General Public License v3.0](LICENSE).
 
 ## Public install (Python 3.12)
 
-You only need this public repository. Engines resolve from public GitHub (`WeissHymmnos/ReproAgent` @ `finaince-desk`, `WeissHymmnos/aiminer` @ `finaince-312`). No private token, no author `Documents/` layout, no `../reproagent` checkout.
+You only need this public repository. Engines resolve from public GitHub at pinned commits (see `pyproject.toml` extras). No private token, no author `Documents/` layout, no `../reproagent` checkout. Sibling `src` injection stays off unless you set `FINAINCE_PATH_HACK=1`.
 
 ```bash
 git clone https://github.com/WeissHymmnos/finaince.git
@@ -21,7 +21,7 @@ uv pip install -e ".[reproduction]"
 finaince doctor
 ```
 
-`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install (CI sets `FINAINCE_NO_PATH_HACK=1` so the path fallback is off).
+`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install. Mutation HTTP (`finaince serve`) requires `FINAINCE_DESK_TOKEN`.
 
 Optional extras:
 
@@ -39,7 +39,7 @@ Uses the shipped thin `local_panel` parquet. Every command below is a real CLI e
 # 1. Health
 finaince doctor
 
-# 2. Public research number (locked window / universe / cost / expression)
+# 2. Install-smoke baseline (locked window / universe / cost / expression)
 finaince baseline
 
 # 3. Same expression through the eval router
@@ -56,9 +56,9 @@ finaince review
 
 Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns. `qlib` on the 3.12 slim install reports `ok: false` until a real 3.10 subprocess is enabled.
 
-## Public research number
+## Install-smoke baseline
 
-`finaince baseline` (and `run_locked_baseline()`) lock:
+`finaince baseline` (and `run_locked_baseline()`) lock a **smoke** window on the packaged two-name panel:
 
 | Field | Value |
 |---|---|
@@ -68,15 +68,15 @@ Promotion stays pending or fail-closed when the row is thin, proxied, or missing
 | expression | `Rank(Delta(close, 1))` |
 | dialect | `repro_polars` |
 
-Two consecutive runs must agree on `ok` and the reported IC/Sharpe (or the same skip). The claim names the `local_panel` fixture and 0 bps cost.
+Two consecutive runs must agree on `ok` and the reported IC/Sharpe. The claim names the smoke `local_panel` fixture and 0 bps cost. Promote/approve fail-closed with `thin_panel` while this fixture has fewer than 20 assets.
 
 ## Features
 
 - Catalog → eval → fail-closed promote/review on one desk
 - 研报复现 via `reproagent` and `finpdfpro` (layout and formulas)
-- Citable locked-window number on the shipped `local_panel`
+- Locked smoke-window eval on the shipped `local_panel` fixture (0 bps)
 
-Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity and a declared local-panel baseline. Qlib's public figures use long CSI300 windows; FinAlpha publishes the locked `local_panel` window and 0 bps cost.
+Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity and a declared local-panel smoke baseline. Qlib's public figures use long CSI300 windows; FinAlpha publishes the locked `local_panel` smoke window and 0 bps cost.
 
 ## Tests
 
