@@ -186,9 +186,10 @@ def test_eval_local_does_not_claim_csi300(isolated_home: Path) -> None:
     assert local.metrics.get("universe_claim") == "local_panel"
     note = str(local.metrics.get("note") or "") + str(local.error or "")
     assert "paper ARR" not in note
-    qlib = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
-    assert qlib.ok is False
-    assert qlib.error == "qlib_placeholder"
+    qlib = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib", data_backend="local"))
+    assert qlib.ok is True, qlib
+    assert qlib.error != "qlib_placeholder"
+    assert isinstance(qlib.metrics.get("ic_mean"), (int, float))
 
 
 def test_empty_window_eval_is_not_ok(isolated_home: Path) -> None:

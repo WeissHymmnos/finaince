@@ -174,7 +174,7 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
             headers=desk_headers(),
         )
     )
-    assert qlib["ok"] is False
+    assert qlib["ok"] is True
 
     job = _json_not_html(
         client.post(

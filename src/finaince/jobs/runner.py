@@ -373,7 +373,11 @@ def run_impl_job(
     payload = {"name": name, "universe": universe}
 
     def _run() -> dict[str, Any]:
-        isolated = run_isolated(source, name=name)
+        import re
+
+        match = re.search(r"^EXPRESSION\s*=\s*['\"]([^'\"]+)['\"]", source, re.M)
+        expression = match.group(1) if match else None
+        isolated = run_isolated(source, name=name, expression=expression)
         if not isolated.get("ok"):
             return isolated
         stored = upsert_isolated(isolated, universe=universe)

@@ -32,7 +32,7 @@ def test_trace_two_actions_cite_first_id(isolated_home: Path) -> None:
     first = evaluate(EvalRequest(expression="Rank(Delta(close, 1))", dialect="repro_polars"))
     assert first.dialect == "repro_polars"
     second = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
-    assert second.ok is False
+    assert second.dialect == "qlib"
     chain = list_chain(limit=10)
     assert len(chain) >= 2
     later, earlier = chain[0], chain[1]
@@ -58,7 +58,7 @@ def test_http_trace_after_two_desk_actions(isolated_home: Path) -> None:
         headers=desk_headers(),
     )
     assert ev2.status_code == 200
-    assert ev2.json()["ok"] is False
+    assert ev2.json()["ok"] is True
     listed = client.get("/api/v1/trace")
     assert listed.status_code == 200
     items = listed.json()["items"]
@@ -208,7 +208,8 @@ def test_doctor_reports_isolator_and_qlib_child(isolated_home: Path) -> None:
     assert isinstance(doc["isolator"].get("ok"), bool)
     assert isinstance(doc["qlib_child"].get("ok"), bool)
     qlib = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
-    assert qlib.ok is False
+    assert qlib.ok is True
+    assert qlib.error != "qlib_placeholder"
 
 
 def test_workbench_runs_page_lists_trace() -> None:

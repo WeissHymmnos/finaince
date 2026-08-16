@@ -12,11 +12,15 @@ from finaince.settings import get_settings
 
 def resolve_workbench_dist() -> Path | None:
     """Locate the built workbench. Same CWD candidates as aiminer.api, plus absolute trees."""
+    import os
+
     from finaince._paths import documents_root
 
     root = documents_root()
     here = Path(__file__).resolve()
     packaged = here.parent / "web"
+    if os.environ.get("FINAINCE_PACKAGED_SPA", "").strip() == "1" and (packaged / "index.html").is_file():
+        return packaged
     candidates: list[Path] = [
         Path("frontend_dist"),
         Path("frontend/dist"),

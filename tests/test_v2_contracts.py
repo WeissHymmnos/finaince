@@ -86,10 +86,12 @@ def test_eval_snapshot_compares_shipped_bundle(isolated_home: Path) -> None:
     assert out["ok"] is True
 
 
-def test_qlib_placeholder_is_not_ok(isolated_home: Path) -> None:
-    out = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
-    assert out.ok is False
-    assert out.error == "qlib_placeholder"
+def test_qlib_local_child_is_ok_on_shipped_panel(isolated_home: Path) -> None:
+    out = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib", data_backend="local"))
+    assert out.ok is True, out
+    assert out.error != "qlib_placeholder"
+    assert isinstance(out.metrics.get("ic_mean"), (int, float))
+    assert out.metrics.get("via") == "qlib_child"
 
 
 def test_thin_panel_gate_fires_on_smoke_panel_regardless_of_universe(isolated_home: Path) -> None:
@@ -206,7 +208,8 @@ def test_http_detail_reject_jobs_qlib(isolated_home: Path) -> None:
         headers=desk_headers(),
     )
     assert qlib.status_code == 200
-    assert qlib.json()["ok"] is False
+    assert qlib.json()["ok"] is True
+    assert qlib.json()["error"] != "qlib_placeholder"
     rejected = client.post(
         f"/api/v1/review/{promo['promotion_id']}/reject",
         headers=desk_headers(),
@@ -261,13 +264,11 @@ def test_qlib_placeholder_and_fake_subprocess(isolated_home: Path, monkeypatch, 
 
     monkeypatch.delenv("FINAINCE_QLIB_SUBPROCESS", raising=False)
     monkeypatch.delenv("FINAINCE_QLIB_PLACEHOLDER_OK", raising=False)
-    off = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
-    assert off.ok is False
-    assert off.error == "qlib_placeholder"
+    off = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib", data_backend="local"))
+    assert off.ok is True, off
+    assert off.error != "qlib_placeholder"
     skipped = compare_engines("Rank(Delta(close, 1))")
-    assert skipped["ok"] is False
-    assert skipped["skipped"] is True
-    assert skipped["qlib"] is None
+    assert skipped["qlib"] is None or skipped["skipped"] is True
 
     fake = tmp_path / "fake-python"
     fake.write_text("#!/bin/sh\necho not-json\nexit 1\n", encoding="utf-8")

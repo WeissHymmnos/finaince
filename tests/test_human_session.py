@@ -175,7 +175,8 @@ def test_human_mutation_loop_on_served_app(isolated_home: Path, sample_report_pa
         headers=desk_headers(),
     )
     assert qlib.status_code == 200
-    assert qlib.json()["ok"] is False
+    assert qlib.json()["ok"] is True
+    assert isinstance((qlib.json().get("metrics") or {}).get("ic_mean"), (int, float))
     job = client.post(
         "/api/v1/reproduce",
         json={"pdf_path": str(sample_report_path), "sync": False},

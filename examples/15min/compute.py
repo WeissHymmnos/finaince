@@ -1,6 +1,7 @@
 """Fixture compute(panel) for the 15-minute desk walk. Isolated impl only."""
 
 NAME = "rank_delta"
+EXPRESSION = "Rank(Delta(close, 1))"
 
 
 def compute(panel):

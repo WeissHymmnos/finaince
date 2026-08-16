@@ -154,12 +154,26 @@ def default_panel() -> dict[str, list[float]]:
     return {"close": close, "open": [c - 0.1 for c in close]}
 
 
-def run_isolated(source: str, *, name: str = "isolated", panel: dict[str, Any] | None = None) -> dict[str, Any]:
+def run_isolated(
+    source: str,
+    *,
+    name: str = "isolated",
+    panel: dict[str, Any] | None = None,
+    expression: str | None = None,
+) -> dict[str, Any]:
     """Spawn a child that only runs ``child_isolate``. No pip in the child."""
     avail = isolator_available()
     if not avail.get("ok"):
         return {"ok": False, "skipped": True, "error": "isolator_unavailable", "reason": avail.get("error")}
-    payload = json.dumps({"source": source, "name": name, "panel": panel or default_panel()}, default=str)
+    payload = json.dumps(
+        {
+            "source": source,
+            "name": name,
+            "panel": panel or default_panel(),
+            "expression": expression,
+        },
+        default=str,
+    )
     env = os.environ.copy()
     env["FINAINCE_ISOLATE"] = "1"
     try:

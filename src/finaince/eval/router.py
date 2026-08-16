@@ -235,50 +235,54 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             error=None if ok else "empty_or_missing_ic",
         )
     if req.dialect == "qlib":
-        import os
+        from finaince.eval.qlib_subprocess import (
+            child_qlib_eval,
+            qlib_subprocess_enabled,
+            run_qlib_eval,
+        )
+        from finaince.runtime import packaged_local_panel, qlib_local_data_path
 
-        from finaince.eval.qlib_subprocess import qlib_subprocess_enabled, run_qlib_eval
-
+        backend = (req.data_backend or "local").strip().lower()
+        if backend in {"", "auto"}:
+            backend = "local"
+        path = qlib_local_data_path() or packaged_local_panel()
         if qlib_subprocess_enabled():
-            backend = (req.data_backend or "qlib").strip().lower()
-            if backend in {"", "auto"}:
-                backend = "qlib"
             payload = run_qlib_eval(
                 req.expression,
                 start=req.start,
                 end=req.end,
                 universe=req.universe,
                 data_backend=backend,
+                local_data_path=str(path) if path else None,
             )
-            ok = bool(payload.get("ok"))
-            emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=ok)
-            return EvalResult(
-                ok=ok,
-                dialect=req.dialect,
-                data_backend=req.data_backend,
-                metrics={
-                    **(payload.get("metrics") or {}),
-                    "via": "qlib_subprocess",
-                    "universe_claim": req.universe,
-                    "alt_text": alt_text,
-                },
-                translatable=translatable,
-                alt_text=alt_text,
-                error=None if ok else str(payload.get("error") or "qlib_subprocess_failed"),
+            via = "qlib_subprocess"
+        else:
+            payload = child_qlib_eval(
+                {
+                    "expression": req.expression,
+                    "data_backend": "local",
+                    "local_data_path": str(path) if path else None,
+                    "local_data_layout": "panel",
+                    "start": req.start or "2023-01-02",
+                    "end": req.end or "2023-02-10",
+                }
             )
-        emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
+            via = "qlib_child"
+        ok = bool(payload.get("ok"))
+        emit("eval_finished", dialect=req.dialect, data_backend=backend, ok=ok)
         return EvalResult(
-            ok=False,
+            ok=ok,
             dialect=req.dialect,
-            data_backend=req.data_backend,
+            data_backend=backend,
             metrics={
-                "note": "qlib dialect is a 3.12 placeholder; live AlphaEval stays on 3.10",
+                **(payload.get("metrics") or {}),
+                "via": via,
                 "universe_claim": req.universe,
                 "alt_text": alt_text,
             },
             translatable=translatable,
             alt_text=alt_text,
-            error="qlib_placeholder",
+            error=None if ok else str(payload.get("error") or "qlib_child_failed"),
         )
     emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
     return EvalResult(

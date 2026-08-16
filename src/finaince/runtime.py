@@ -73,6 +73,55 @@ def packaged_local_panel() -> Path | None:
     return None
 
 
+# aiminer.core.local_data._COLUMN_ALIASES + canonical names. trade_date/ts_code
+# are valid for repro_polars but not for the qlib child schema.
+_QLIB_DATETIME_NAMES = {"datetime", "date", "time", "timestamp"}
+_QLIB_INSTRUMENT_NAMES = {
+    "instrument",
+    "symbol",
+    "ticker",
+    "asset",
+    "order_book_id",
+    "code",
+}
+
+
+def _parquet_column_names(parquet: Path) -> list[str]:
+    try:
+        import polars as pl
+
+        return list(pl.scan_parquet(parquet).collect_schema().names())
+    except Exception:
+        try:
+            import pandas as pd
+
+            return [str(col) for col in pd.read_parquet(parquet).columns]
+        except Exception:
+            return []
+
+
+def local_panel_has_qlib_schema(path: Path | None) -> bool:
+    """True when the parquet has columns the qlib child can canonicalize."""
+    if path is None:
+        return False
+    parquet = path / "prices.parquet" if path.is_dir() else path
+    if not parquet.is_file():
+        return False
+    lowered = {str(name).strip().lower() for name in _parquet_column_names(parquet)}
+    return bool(lowered & _QLIB_DATETIME_NAMES) and bool(lowered & _QLIB_INSTRUMENT_NAMES)
+
+
+def qlib_local_data_path() -> Path | None:
+    """Prefer the configured local panel only if qlib can load it."""
+    candidate = local_data_path()
+    if local_panel_has_qlib_schema(candidate):
+        return candidate
+    packed = packaged_local_panel()
+    if local_panel_has_qlib_schema(packed):
+        return packed
+    return packed or candidate
+
+
 def local_data_path() -> Path | None:
     for key in ("FINAINCE_LOCAL_DATA_PATH", "LOCAL_DATA_PATH"):
         raw = (os.getenv(key) or "").strip()
