@@ -2,7 +2,7 @@
 
 [English](README.md) · **中文**
 
-面向中国卖方因子研究的审核台：把候选因子收进 catalog，在锁定的本地 panel 上评测，门禁通过后再晋升，并用 `reproagent` + `finpdfpro` 复现研报。
+FinAlpha 管卖方研报里的选股因子：收进 catalog，在本地 panel 上评测，过了门禁再晋升；研报用 `reproagent` 和 `finpdfpro` 复现。
 
 安装包名是 `finaince`，产品名是 **FinAlpha**。
 
@@ -73,7 +73,7 @@ HTTP `POST /api/v1/review/{id}/approve` 若带上 `{"override":[...]}`，固定�
 - 在随包装好的 `local_panel` 上跑锁定冒烟窗口（0 bps）
 - 3.12 slim extra 上通过进程内 local child 跑 `qlib` 方言
 
-和邻近工具比：RD-Agent 是无人值守的 Qlib CSI300 研发环；FinAlpha 是给人审的工作台，强调中文卖方 PDF 的保真，并公开声明自己的 `local_panel` 冒烟窗口和 0 bps 成本。Qlib 公开数字用的是长窗口 CSI300；FinAlpha 发表的是这份锁定冒烟窗口。
+和邻近工具比：RD-Agent 通宵自己跑 Qlib CSI300；FinAlpha 让你自己审目录和研报，并写明冒烟窗口用的是 `local_panel`、成本 0 bps。Qlib 公开数字来自长窗口 CSI300；这里发表的是这份锁定冒烟窗口。
 
 ## 测试
 

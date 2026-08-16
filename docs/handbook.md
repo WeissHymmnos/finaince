@@ -10,14 +10,9 @@
 
 ## 1. 这是什么
 
-FinAlpha 是给人坐下来用的中国卖方因子研究台。日常流程是：
+FinAlpha 管卖方研报里的选股因子。你在本机打开它，把候选收进 **catalog**，在本地行情上 **eval**，过了门禁再 **promote → review → pool**。研报本身用 `reproagent` 和 `finpdfpro` 抽公式、再回测。
 
-1. 把候选因子收进 **catalog**
-2. 在锁定的本地行情面板上 **eval**
-3. 过完门禁，再 **promote → review → pool**
-4. 用 `reproagent` 和 `finpdfpro` **复现研报**
-
-开箱自带一份两只股票的 `local_panel`，窗口是 2023-01-03 到 2023-02-10，成本 0 bps，表达式是 `Rank(Delta(close, 1))`。`finaince baseline` 报出来的 IC、Sharpe 只描述这份安装冒烟夹具。样本很薄，当作安装是否跑通的记号即可。
+随包装了一份两只股票的 `local_panel`，窗口是 2023-01-03 到 2023-02-10，成本 0 bps，表达式是 `Rank(Delta(close, 1))`。`finaince baseline` 报出来的 IC、Sharpe 只对这份夹具负责。样本很薄，用来确认安装跑通就行。
 
 ---
 
@@ -295,8 +290,8 @@ GitHub Actions 跑两份：`packaging-312`（公开 extras，并设置 `FINAINCE
 
 ## 10. 能做什么，还要另备什么
 
-clone 下来之后，可以在本机跑 desk：catalog、eval、CLI review、仓库里的 sample PDF 复现，以及 3.12 上的 qlib child。
+clone 下来之后，本机就能跑 catalog、eval、CLI review，复现仓库里的 sample PDF，以及 3.12 上的 qlib child。
 
-若要当研究台用，还需要：编好的前端 dist、至少 20 只股票的研究 panel、米筐或自己的行情。真研报抽取和 swarm 还要 LLM。
+要拿它评真正的因子，还得自己准备：编好的前端 dist、至少 20 只股票的行情，米筐或本地数据都行。要从券商 PDF 里抽公式、跑 swarm，还需要 LLM。
 
 对外引用冒烟 IC / Sharpe 时，请一并带上 `claim` 里的那句：*install smoke local_panel fixture; cost 0 bps*。
