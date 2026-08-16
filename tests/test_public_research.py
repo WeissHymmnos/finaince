@@ -75,6 +75,11 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "finaince baseline" in readme
     assert "finaince impl examples/15min/compute.py" in readme
     assert "docs/handbook.md" in readme
+    assert "[中文](README.zh-CN.md)" in readme
+    zh_readme = ROOT / "README.zh-CN.md"
+    assert zh_readme.is_file()
+    assert "[English](README.md)" in zh_readme.read_text()
+    assert "FINAINCE_DESK_TOKEN" in zh_readme.read_text()
     handbook = ROOT / "docs" / "handbook.md"
     assert handbook.is_file()
     handbook_text = handbook.read_text()

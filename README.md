@@ -1,10 +1,12 @@
 # FinAlpha
 
+**English** · [中文](README.zh-CN.md)
+
 Fail-closed research desk for **China sell-side factor work**: catalog a candidate, evaluate it on a locked local panel, promote it only when the gates pass, and reproduce a 研报 through `reproagent` + `finpdfpro`.
 
 The installable package name is `finaince`. The product name is **FinAlpha**.
 
-**[Product handbook](docs/handbook.md)** — full tutorial, CLI reference, HTTP contract, and workbench screenshots.
+**[Product handbook](docs/handbook.md)** — full tutorial (Chinese), CLI reference, HTTP contract, and workbench screenshots.
 
 ![Catalog with a desk token](docs/handbook/images/01-catalog.png)
 
