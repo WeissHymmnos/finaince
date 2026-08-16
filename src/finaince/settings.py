@@ -19,7 +19,7 @@ from finaince.runtime import (
     mock_llm_requested,
     pdf_root,
     resolve_data_source,
-    resolve_deepseek_llm,
+    resolve_llm,
 )
 
 
@@ -32,7 +32,7 @@ class FinainceSettings(BaseSettings):
     auto_promote: bool = False
     default_data_backend: str = "local"
     local_data_path: Path | None = None
-    llm_provider: str | None = "deepseek"
+    llm_provider: str | None = None
     llm_api_key: str = ""
     llm_model: str | None = None
     llm_base_url: str | None = None
@@ -59,7 +59,7 @@ class FinainceSettings(BaseSettings):
         return self.home / "reproagent"
 
     def apply_engine_env(self) -> None:
-        """Export AIMINER_* / repro dirs / DeepSeek before importing engines."""
+        """Export AIMINER_* / repro dirs / chat LLM before importing engines."""
         load_engine_dotenv()
         self.home.mkdir(parents=True, exist_ok=True)
         self.aiminer_results.mkdir(parents=True, exist_ok=True)
@@ -76,12 +76,12 @@ class FinainceSettings(BaseSettings):
         align_aiminer_auth_env()
         if self.pdf_root:
             os.environ.setdefault("FINAINCE_PDF_ROOT", str(self.pdf_root))
-        llm = resolve_deepseek_llm()
+        llm = resolve_llm()
         key = self.llm_api_key or llm["api_key"]
-        provider = self.llm_provider or llm["aiminer_provider"]
+        provider = (self.llm_provider or llm["aiminer_provider"] or "").strip()
         if key:
-            inject_llm_env({**llm, "api_key": key})
-            if llm.get("via") != "cpa":
+            inject_llm_env({**llm, "api_key": key, "aiminer_provider": provider})
+            if provider:
                 inject_aiminer_api_key(provider, key)
         if llm.get("base_url"):
             os.environ.setdefault("AIMINER_LLM_BASE_URL", str(llm["base_url"]))
@@ -153,7 +153,7 @@ def reproagent_runtime_settings():
             data_dir=cfg.repro_data_dir,
             memory_enabled=True,
         )
-    llm = resolve_deepseek_llm()
+    llm = resolve_llm()
     data_source = resolve_data_source()
     local = cfg.local_data_path or local_data_path() or sibling_fixture_data()
     return Settings(
@@ -198,18 +198,19 @@ def default_reproduce_backtest_kwargs() -> dict[str, Any]:
 
 
 def swarm_argv(user_args: list[str] | None = None) -> list[str]:
-    """Inject CPA DeepSeek + ricequant unless the caller already set them."""
+    """Inject the resolved chat LLM + data flags unless the caller set them."""
     args = list(user_args or [])
-    llm = resolve_deepseek_llm()
+    llm = resolve_llm()
 
     def _has(flag: str) -> bool:
         return flag in args
 
     extras: list[str] = []
-    if not _has("--llm-provider"):
-        extras += ["--llm-provider", "deepseek"]
-    if not _has("--llm-model"):
-        extras += ["--llm-model", llm["model"]]
+    provider = (llm.get("aiminer_provider") or "").strip()
+    if not _has("--llm-provider") and llm.get("via") not in {None, "", "missing"} and provider:
+        extras += ["--llm-provider", provider]
+    if not _has("--llm-model") and llm.get("model"):
+        extras += ["--llm-model", str(llm["model"])]
     if not _has("--llm-base-url") and llm.get("base_url"):
         extras += ["--llm-base-url", str(llm["base_url"])]
     if not _has("--mode"):
@@ -221,7 +222,6 @@ def swarm_argv(user_args: list[str] | None = None) -> list[str]:
         if local:
             extras += ["--local-data-path", str(local)]
     if not _has("--embedding-provider"):
-        # DeepSeek/CPA is chat-only; wiki/RAG must not hit gptsapi with that key.
         extras += ["--embedding-provider", "local"]
     return extras + args
 
@@ -250,7 +250,7 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
     }:
         ok = False
         issues.append(f"unknown llm_provider={cfg.llm_provider!r}")
-    llm = resolve_deepseek_llm(probe=False)
+    llm = resolve_llm(probe=False)
     data = cfg.local_data_path or local_data_path()
     root = cfg.pdf_root or pdf_root()
     pdf_sample = None

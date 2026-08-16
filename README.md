@@ -81,7 +81,7 @@ Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; Fin
 python -m pytest tests --ignore=tests/test_live_real.py
 ```
 
-Live PDF / RiceQuant / CPA DeepSeek tests stay opt-in (`pytest -m live`) and are skipped without credentials.
+Live PDF / RiceQuant / chat-LLM tests stay opt-in (`pytest -m live`) and are skipped without credentials.
 
 ## Contribute
 

@@ -1,4 +1,4 @@
-"""Live calls: CPA DeepSeek, RiceQuant, ~/Documents/Data, categorized PDF."""
+"""Live calls: configured chat LLM, RiceQuant, ~/Documents/Data, categorized PDF."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from finaince.runtime import (
     cpa_reachable,
     has_rq_credentials,
     official_deepseek_key,
-    resolve_deepseek_llm,
+    resolve_llm,
 )
 
 PINNED_PDFS = {
@@ -39,15 +39,16 @@ LIVE_HOME = Path(__file__).resolve().parents[1] / "output" / "live-real"
 
 
 def _llm():
-    return resolve_deepseek_llm(probe=True)
+    return resolve_llm(probe=True)
 
 
 @pytest.mark.live
-def test_cpa_deepseek_chat_completion() -> None:
+def test_live_llm_chat_completion() -> None:
     llm = _llm()
-    assert llm["via"] in {"cpa", "deepseek-official"}, llm
-    assert llm["api_key"], "DeepSeek/CPA key missing"
-    assert llm["model"]
+    if llm["via"] == "missing" or not llm["api_key"]:
+        pytest.skip("no chat LLM configured")
+    if not llm["model"]:
+        pytest.skip("FINAINCE_LLM_MODEL unset")
     from openai import OpenAI
 
     client = OpenAI(api_key=llm["api_key"], base_url=llm["base_url"])
@@ -155,7 +156,7 @@ def test_reproduce_categorized_pdf_writes_returns(tmp_path: Path) -> None:
         pytest.skip(f"missing real PDF {REAL_PDF}")
     llm = _llm()
     if not llm["api_key"]:
-        pytest.skip("DeepSeek/CPA key missing")
+        pytest.skip("chat LLM key missing")
     if not has_rq_credentials():
         pytest.skip("RiceQuant credentials missing")
 
@@ -198,7 +199,7 @@ def _live_reproduce(pdf: Path, tmp_path: Path) -> dict:
         pytest.skip(f"missing pinned PDF {pdf}")
     llm = _llm()
     if not llm["api_key"]:
-        pytest.skip("DeepSeek/CPA key missing")
+        pytest.skip("chat LLM key missing")
     if not has_rq_credentials():
         pytest.skip("RiceQuant credentials missing")
     from finaince.reproduction import reproduce_report

@@ -81,7 +81,7 @@ HTTP `POST /api/v1/review/{id}/approve` 若带上 `{"override":[...]}`，固定�
 python -m pytest tests --ignore=tests/test_live_real.py
 ```
 
-券商 PDF、米筐、CPA DeepSeek 的测试是可选的（`pytest -m live`），没有凭据就不要跑。
+券商 PDF、米筐、聊天模型的测试是可选的（`pytest -m live`），没有凭据就不要跑。
 
 ## 参与贡献
 

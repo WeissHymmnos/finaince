@@ -1,4 +1,4 @@
-"""Resolve real PDF / market-data / DeepSeek (CPA) endpoints. No secrets logged."""
+"""Resolve PDF, market-data, and chat-LLM endpoints. No secrets logged."""
 
 from __future__ import annotations
 
@@ -11,10 +11,18 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_LOCAL_DATA = Path.home() / "Documents" / "Data"
-CPA_HOST_DEFAULT = "http://127.0.0.1:8317"
-# instructor tool_choice is rejected by DeepSeek V4 thinking models on CPA.
-CPA_DEEPSEEK_MODEL = "deepseek-chat"
 OFFICIAL_DEEPSEEK_BASE = "https://api.deepseek.com/v1"
+OFFICIAL_OPENAI_BASE = "https://api.openai.com/v1"
+
+_VENDOR_KEYS: tuple[tuple[str, tuple[str, ...], str, str, str], ...] = (
+    ("openai", ("OPENAI_API_KEY", "OpenAI_KEY"), OFFICIAL_OPENAI_BASE, "openai", "openai"),
+    ("anthropic", ("ANTHROPIC_API_KEY",), "", "claude", "anthropic"),
+    ("claude", ("ClaudeCode_KEY",), "", "claude", "anthropic"),
+    ("glm", ("GLM_KEY",), "", "glm", "openai"),
+    ("qwen", ("DASHSCOPE_API_KEY",), "", "qwen", "openai"),
+    ("kimi", ("MOONSHOT_API_KEY",), "", "kimi", "openai"),
+    ("deepseek", ("DEEPSEEK_API_KEY", "Deepseek_KEY"), OFFICIAL_DEEPSEEK_BASE, "deepseek", "openai"),
+)
 RQ_EVAL_START = date(2024, 1, 2)
 RQ_EVAL_END = date(2024, 3, 29)
 
@@ -146,22 +154,34 @@ def _openai_base(host: str) -> str:
     return host + "/v1"
 
 
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def llm_gateway_base() -> str:
+    """OpenAI-compatible gateway. Only when the operator sets a base URL."""
+    return _first_env("FINAINCE_LLM_BASE_URL", "ANTHROPIC_BASE_URL").rstrip("/")
+
+
 def cpa_base_url() -> str:
-    return (os.getenv("ANTHROPIC_BASE_URL") or CPA_HOST_DEFAULT).rstrip("/")
+    """Historical name for the local OpenAI-compatible gateway."""
+    return llm_gateway_base()
 
 
 def cpa_api_key() -> str:
-    return (
-        os.getenv("ANTHROPIC_AUTH_TOKEN")
-        or os.getenv("CPA_API_KEY")
-        or os.getenv("ANTHROPIC_API_KEY")
-        or ""
-    ).strip()
+    return _first_env("ANTHROPIC_AUTH_TOKEN", "CPA_API_KEY")
 
 
 def cpa_reachable(timeout: float = 1.5) -> bool:
-    key = cpa_api_key()
-    url = _openai_base(cpa_base_url()) + "/models"
+    base = llm_gateway_base()
+    if not base:
+        return False
+    key = cpa_api_key() or _first_env("FINAINCE_LLM_API_KEY", "LLM_API_KEY")
+    url = _openai_base(base) + "/models"
     try:
         req = Request(url, headers={"Authorization": f"Bearer {key}"} if key else {})
         with urlopen(req, timeout=timeout) as resp:
@@ -171,46 +191,82 @@ def cpa_reachable(timeout: float = 1.5) -> bool:
 
 
 def official_deepseek_key() -> str:
-    for key in ("DEEPSEEK_API_KEY", "Deepseek_KEY", "LLM_API_KEY"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return ""
+    return _first_env("DEEPSEEK_API_KEY", "Deepseek_KEY")
 
 
-def resolve_deepseek_llm(*, probe: bool = False) -> dict[str, Any]:
-    """Prefer CPA's DeepSeek route; fall back to official api.deepseek.com."""
+def resolve_llm(*, probe: bool = False) -> dict[str, Any]:
+    """Pick a chat LLM from env. No vendor is assumed."""
     load_engine_dotenv()
-    model = os.getenv("FINAINCE_LLM_MODEL") or CPA_DEEPSEEK_MODEL
-    cpa_key = cpa_api_key()
-    use_cpa = bool(cpa_key) and (cpa_reachable() if probe else bool(cpa_base_url()))
-    if use_cpa:
+    provider = (os.getenv("FINAINCE_LLM_PROVIDER") or "").strip().lower()
+    model = (os.getenv("FINAINCE_LLM_MODEL") or "").strip()
+    explicit_base = (os.getenv("FINAINCE_LLM_BASE_URL") or "").strip()
+    key = _first_env("FINAINCE_LLM_API_KEY", "LLM_API_KEY")
+
+    gateway_base = llm_gateway_base()
+    gateway_key = key or cpa_api_key()
+    if gateway_key and gateway_base and (not probe or cpa_reachable()):
+        name = provider or "openai"
+        if name in {"", "openai", "anthropic"}:
+            name = "openai"
         return {
-            "via": "cpa",
-            "aiminer_provider": "deepseek",
+            "via": "gateway",
+            "aiminer_provider": name,
             "repro_provider": "openai",
-            "api_key": cpa_key,
-            "base_url": _openai_base(cpa_base_url()),
+            "api_key": gateway_key,
+            "base_url": _openai_base(gateway_base),
             "model": model,
         }
-    official = official_deepseek_key()
-    if official:
+
+    vendors = {row[0]: row for row in _VENDOR_KEYS}
+    if provider:
+        row = vendors.get(provider)
+        if row is None:
+            return {
+                "via": provider if key else "missing",
+                "aiminer_provider": provider,
+                "repro_provider": "openai",
+                "api_key": key,
+                "base_url": _openai_base(explicit_base) if explicit_base else "",
+                "model": model,
+            }
+        _name, key_names, default_base, aiminer, repro = row
+        found = key or _first_env(*key_names)
+        host = explicit_base or default_base
         return {
-            "via": "deepseek-official",
-            "aiminer_provider": "deepseek",
-            "repro_provider": "openai",
-            "api_key": official,
-            "base_url": OFFICIAL_DEEPSEEK_BASE,
-            "model": os.getenv("FINAINCE_LLM_MODEL") or "deepseek-v4-flash",
+            "via": provider if found else "missing",
+            "aiminer_provider": aiminer,
+            "repro_provider": repro,
+            "api_key": found,
+            "base_url": _openai_base(host) if host else "",
+            "model": model,
+        }
+
+    for name, key_names, default_base, aiminer, repro in _VENDOR_KEYS:
+        found = _first_env(*key_names)
+        if not found:
+            continue
+        host = explicit_base or default_base
+        return {
+            "via": name,
+            "aiminer_provider": aiminer,
+            "repro_provider": repro,
+            "api_key": found,
+            "base_url": _openai_base(host) if host else "",
+            "model": model,
         }
     return {
         "via": "missing",
-        "aiminer_provider": "deepseek",
+        "aiminer_provider": "openai",
         "repro_provider": "openai",
         "api_key": "",
-        "base_url": _openai_base(cpa_base_url()),
+        "base_url": _openai_base(explicit_base) if explicit_base else "",
         "model": model,
     }
+
+
+def resolve_deepseek_llm(*, probe: bool = False) -> dict[str, Any]:
+    """Alias kept for older call sites."""
+    return resolve_llm(probe=probe)
 
 
 def resolve_data_source() -> str:
@@ -330,15 +386,10 @@ def inject_llm_env(llm: dict[str, Any]) -> None:
     key = llm.get("api_key") or ""
     if not key:
         return
-    # CPA's local token must win over official DEEPSEEK_API_KEY from .env,
-    # otherwise aiminer hits 127.0.0.1:8317 with the cloud key and gets 401.
-    if llm.get("via") == "cpa":
+    os.environ["LLM_API_KEY"] = key
+    os.environ["FINAINCE_LLM_API_KEY"] = key
+    provider = (llm.get("aiminer_provider") or "").strip().lower()
+    if provider == "deepseek":
         os.environ["DEEPSEEK_API_KEY"] = key
-        os.environ["LLM_API_KEY"] = key
-        os.environ["FINAINCE_LLM_API_KEY"] = key
-    else:
-        os.environ.setdefault("DEEPSEEK_API_KEY", key)
-        os.environ.setdefault("LLM_API_KEY", key)
-        os.environ.setdefault("FINAINCE_LLM_API_KEY", key)
     if llm.get("base_url"):
         os.environ["FINAINCE_LLM_BASE_URL"] = str(llm["base_url"])

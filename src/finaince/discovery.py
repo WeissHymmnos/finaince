@@ -40,7 +40,7 @@ def run_swarm(args: list[str] | None = None) -> dict[str, Any]:
     from pathlib import Path
 
     from finaince._paths import ensure_import_paths
-    from finaince.runtime import aiminer_python, inject_llm_env, resolve_deepseek_llm
+    from finaince.runtime import aiminer_python, inject_llm_env, resolve_llm
     from finaince.settings import swarm_argv
 
     from finaince.settings import get_settings
@@ -64,7 +64,7 @@ def run_swarm(args: list[str] | None = None) -> dict[str, Any]:
     env["PYTHONPATH"] = str(Path(srcs[0])) + os.pathsep + env.get("PYTHONPATH", "")
     env["AIMINER_RESULTS_DIR"] = str(cfg.aiminer_results)
     env["AIMINER_DATA_DIR"] = str(cfg.home / "aiminer" / "data")
-    inject_llm_env(resolve_deepseek_llm())
+    inject_llm_env(resolve_llm())
     completed = subprocess.run(
         [py, "-m", "aiminer.manager", *argv],
         env=env,

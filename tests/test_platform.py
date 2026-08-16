@@ -300,23 +300,83 @@ def test_eval_router_repro_polars(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any(isinstance(v, (int, float)) and v is not None for v in numeric)
 
 
-def test_cpa_llm_env_overwrites_official_deepseek_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_llm_env_is_generic(monkeypatch: pytest.MonkeyPatch) -> None:
     from finaince.runtime import inject_llm_env
 
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-official-should-not-win")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     inject_llm_env(
         {
-            "via": "cpa",
-            "api_key": "cpa-local-token",
+            "via": "gateway",
+            "aiminer_provider": "openai",
+            "api_key": "gateway-token",
             "base_url": "http://127.0.0.1:8317/v1",
         }
     )
     import os
 
-    assert os.environ["DEEPSEEK_API_KEY"] == "cpa-local-token"
+    assert os.environ["LLM_API_KEY"] == "gateway-token"
+    assert os.environ.get("DEEPSEEK_API_KEY") != "gateway-token"
+    inject_llm_env(
+        {
+            "via": "deepseek",
+            "aiminer_provider": "deepseek",
+            "api_key": "sk-ds",
+            "base_url": "https://api.deepseek.com/v1",
+        }
+    )
+    assert os.environ["DEEPSEEK_API_KEY"] == "sk-ds"
 
 
-def test_deepseek_wiki_embedding_is_local_not_gptsapi() -> None:
+def test_resolve_llm_is_not_hardcoded_to_deepseek(monkeypatch: pytest.MonkeyPatch) -> None:
+    from finaince.runtime import resolve_llm
+
+    monkeypatch.setattr("finaince.runtime.load_engine_dotenv", lambda: None)
+    for key in (
+        "FINAINCE_LLM_PROVIDER",
+        "FINAINCE_LLM_MODEL",
+        "FINAINCE_LLM_BASE_URL",
+        "FINAINCE_LLM_API_KEY",
+        "LLM_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CPA_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "Deepseek_KEY",
+        "OPENAI_API_KEY",
+        "OpenAI_KEY",
+        "ANTHROPIC_API_KEY",
+        "ClaudeCode_KEY",
+        "GLM_KEY",
+        "DASHSCOPE_API_KEY",
+        "MOONSHOT_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    missing = resolve_llm()
+    assert missing["via"] == "missing"
+    assert missing["model"] == ""
+
+    monkeypatch.setenv("FINAINCE_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("FINAINCE_LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("FINAINCE_LLM_API_KEY", "sk-test")
+    openai = resolve_llm()
+    assert openai["via"] == "openai"
+    assert openai["aiminer_provider"] == "openai"
+    assert openai["model"] == "gpt-4o-mini"
+    assert "deepseek" not in (openai["base_url"] or "")
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "local-gw")
+    monkeypatch.delenv("FINAINCE_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("FINAINCE_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("FINAINCE_LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("FINAINCE_LLM_MODEL", "my-local-model")
+    gw = resolve_llm()
+    assert gw["via"] == "gateway"
+    assert gw["model"] == "my-local-model"
+    assert gw["aiminer_provider"] == "openai"
+
+
+def test_wiki_embedding_stays_local_for_chat_providers() -> None:
     from aiminer.core.embeddings import resolve_embedding_backend
 
     backend = resolve_embedding_backend("deepseek")
@@ -325,18 +385,43 @@ def test_deepseek_wiki_embedding_is_local_not_gptsapi() -> None:
     assert backend.get("api_base") in {None, ""}
 
 
-def test_swarm_argv_injects_deepseek_and_ricequant() -> None:
+def test_swarm_argv_follows_resolved_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     from finaince.settings import swarm_argv
 
+    monkeypatch.setattr("finaince.runtime.load_engine_dotenv", lambda: None)
+    for key in (
+        "FINAINCE_LLM_PROVIDER",
+        "FINAINCE_LLM_MODEL",
+        "FINAINCE_LLM_BASE_URL",
+        "FINAINCE_LLM_API_KEY",
+        "LLM_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CPA_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "Deepseek_KEY",
+        "OPENAI_API_KEY",
+        "ClaudeCode_KEY",
+        "GLM_KEY",
+        "DASHSCOPE_API_KEY",
+        "MOONSHOT_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    bare = swarm_argv([])
+    assert "--mode" in bare and "ricequant" in bare
+    assert "--embedding-provider" in bare and "local" in bare
+    assert "deepseek" not in bare
+
+    monkeypatch.setenv("FINAINCE_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("FINAINCE_LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("FINAINCE_LLM_API_KEY", "sk-test")
     argv = swarm_argv([])
-    assert "--llm-provider" in argv
-    assert "deepseek" in argv
-    assert "--llm-model" in argv
-    assert "--mode" in argv and "ricequant" in argv
-    assert "--embedding-provider" in argv and "local" in argv
-    custom = swarm_argv(["--iterations", "1", "--llm-model", "deepseek-chat"])
+    assert argv[argv.index("--llm-provider") + 1] == "openai"
+    assert "gpt-4o-mini" in argv
+    assert "deepseek" not in argv
+    custom = swarm_argv(["--iterations", "1", "--llm-model", "kept-model"])
     assert custom.count("--llm-model") == 1
-    assert "deepseek-chat" in custom
+    assert "kept-model" in custom
     assert "--iterations" in custom
 
 

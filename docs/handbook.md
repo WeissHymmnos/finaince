@@ -60,7 +60,7 @@ from aiminer.manager import cull_alpha_pool
 
 ```bash
 export FINAINCE_DATA_SOURCE=local
-export ALLOW_MOCK_LLM=true          # 离线复现用；已经接了 CPA / DeepSeek 就不要设
+export ALLOW_MOCK_LLM=true          # 离线复现用；已经接了聊天模型就不要设
 export FINAINCE_DESK_TOKEN=desk-local
 finaince doctor
 ```
@@ -273,7 +273,7 @@ Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINC
 | `FINAINCE_NO_PATH_HACK=1` | CI 和陌生人安装时关掉旁路 |
 | `ALLOW_MOCK_LLM=true` | 离线 mock 抽取 |
 | `RQ_TOKEN` / `RQ_USER`+`RQ_PASS` | 米筐，可选 |
-| `DEEPSEEK_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | 真实抽取，可选 |
+| `FINAINCE_LLM_PROVIDER` / `FINAINCE_LLM_MODEL` / `FINAINCE_LLM_API_KEY` / `FINAINCE_LLM_BASE_URL` | 聊天模型，可选。不默认任何厂商 |
 | `FINAINCE_LIVE_AGENT=1` | 打开 live Claude 测试 |
 
 ---

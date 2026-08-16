@@ -64,5 +64,5 @@ packages = ["src/finaince"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
-    "live: real PDF / RiceQuant / CPA DeepSeek calls (network, credentials)",
+    "live: real PDF / RiceQuant / chat LLM calls (network, credentials)",
 ]
