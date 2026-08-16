@@ -10,7 +10,7 @@ The installable package name is `finaince`. The product name is **FinAlpha**.
 
 ![Catalog with a desk token](docs/handbook/images/01-catalog.png)
 
-The install smoke figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`. It is a two-name fixture.
+`finaince baseline` runs the two stocks shipped as `local_panel`: cost 0 bps, expression `Rank(Delta(close, 1))`. Those numbers only show that the install ran.
 
 License: [GNU Affero General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for copyright and third-party engines.
 
@@ -34,9 +34,9 @@ Optional extras: `.[agent]` (Claude Agent SDK), `.[dev]` (pytest), `.[all]`.
 
 The wheel ships a stub workbench (`finaince/web/index.html`). A full Catalog/Review UI needs a built `aiminer/frontend/dist`. `FINAINCE_PACKAGED_SPA=1` forces the stub when a sibling dist is present.
 
-## 15-minute path (in-repo fixture)
+## 15-minute path (shipped example)
 
-Uses the shipped thin `local_panel` parquet. Every command is a real CLI entry. The [handbook](docs/handbook.md) walks the same path with screenshots.
+Uses the two-stock `local_panel` parquet in the package. Every command is a real CLI entry. The [handbook](docs/handbook.md) walks the same path with screenshots.
 
 ```bash
 finaince doctor
@@ -50,11 +50,11 @@ finaince review --approve '<promotion_id>' --override thin_panel
 finaince serve --host 127.0.0.1 --port 8000
 ```
 
-HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. The documented success path onto the smoke panel is the CLI `--override thin_panel` line. Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns.
+HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. To put these two stocks in the pool, use the CLI `--override thin_panel` line above. Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns.
 
-## Install-smoke baseline
+## baseline
 
-`finaince baseline` (and `run_locked_baseline()`) lock a **smoke** window on the packaged two-name panel:
+`finaince baseline` (and `run_locked_baseline()`) lock a short window on the two stocks shipped in the package:
 
 | Field | Value |
 |---|---|
@@ -64,16 +64,16 @@ HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. The
 | expression | `Rank(Delta(close, 1))` |
 | dialect | `repro_polars` |
 
-Two consecutive runs must agree on `ok` and the reported IC/Sharpe. The claim names the smoke `local_panel` fixture and 0 bps cost. Promote/approve fail-closed with `thin_panel` while this fixture has fewer than 20 assets.
+Two consecutive runs must agree on `ok` and the reported IC/Sharpe. When you quote those numbers, say they come from the shipped `local_panel` at 0 bps. Promote/approve fail-closed with `thin_panel` while the loaded panel has fewer than 20 assets.
 
 ## Features
 
 - Catalog → eval → fail-closed promote/review on one desk
 - 研报复现 via `reproagent` and `finpdfpro` (layout and formulas)
-- Locked smoke-window eval on the shipped `local_panel` fixture (0 bps)
+- Fixed-window eval on the two stocks shipped as `local_panel` (0 bps)
 - `qlib` dialect on the 3.12 slim extra via the in-process local child
 
-Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity and a declared local-panel smoke baseline. Qlib's public figures use long CSI300 windows; FinAlpha publishes the locked `local_panel` smoke window and 0 bps cost.
+Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity, and it says so when numbers come from the shipped `local_panel` at 0 bps. Qlib's public figures use long CSI300 windows; FinAlpha publishes this short locked window.
 
 ## Tests
 

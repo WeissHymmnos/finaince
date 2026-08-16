@@ -12,7 +12,7 @@
 
 FinAlpha 管卖方研报里的选股因子。你在本机打开它，把候选收进 **catalog**，在本地行情上 **eval**，过了门禁再 **promote → review → pool**。研报本身用 `reproagent` 和 `finpdfpro` 抽公式、再回测。
 
-随包装了一份两只股票的 `local_panel`，窗口是 2023-01-03 到 2023-02-10，成本 0 bps，表达式是 `Rank(Delta(close, 1))`。`finaince baseline` 报出来的 IC、Sharpe 只对这份夹具负责。样本很薄，用来确认安装跑通就行。
+包装里带了两只股票的 `local_panel`，日期从 2023-01-03 到 2023-02-10，成本 0 bps，表达式是 `Rank(Delta(close, 1))`。`finaince baseline` 报的 IC、Sharpe 只对这几条数据负责。股票太少，够用来确认安装跑通。
 
 ---
 
@@ -48,7 +48,7 @@ from aiminer.manager import cull_alpha_pool
 | `.[dev]` | pytest |
 | `.[all]` | 上面全部 |
 
-完整工作台（Catalog、Review 那些页）需要一份编好的 `aiminer/frontend/dist`。wheel 里带的 `finaince/web/index.html` 只是占位。在作者本机，`finaince serve` 会先找旁边的 `aiminer/frontend/dist`。若要强制用占位页，设 `FINAINCE_PACKAGED_SPA=1`。
+完整工作台（Catalog、Review 那些页）需要一份编好的 `aiminer/frontend/dist`。wheel 里只有一张简单的 `finaince/web/index.html`。在作者本机，`finaince serve` 会先找旁边的 `aiminer/frontend/dist`。设 `FINAINCE_PACKAGED_SPA=1` 会只用那张简单页。
 
 ---
 
@@ -67,7 +67,7 @@ finaince doctor
 
 正常时 `"ok"` 为 true，`"imports"` 里 `finaince`、`aiminer`、`reproagent` 都是 true，`qlib_child.via` 是 `qlib_child`。
 
-### 3.2 跑安装冒烟 baseline
+### 3.2 跑一遍自带的 baseline
 
 ```bash
 finaince baseline
@@ -124,7 +124,7 @@ finaince reproduce "$FINAINCE_PDF_ROOT/minimal.pdf" --sync
 
 离线且开了 `ALLOW_MOCK_LLM=true` 时走 mock 抽取。写手册那天跑通的结果是 `"status": "passed"`，因子名 `mock_momentum`，公式 `close / Ref(close, 5) - 1`。没有 LLM 时，也可能停在 `review_enqueued`，并带上 `formula_proxy`。那是管道走完之后的诚实终态。
 
-### 3.6 提交审核，再用 CLI 放行薄面板
+### 3.6 提交审核；股票太少时用 CLI 放行
 
 ```bash
 finaince catalog
@@ -133,7 +133,7 @@ finaince review
 finaince review --approve '<promotion_id>' --override thin_panel
 ```
 
-打包 panel 只有两只股票，晋升时会打上 `thin_panel`。HTTP `POST /api/v1/review/{id}/approve` 如果带了 `override`，固定返回 403。冒烟面板要进 pool，请用上面最后那一行 CLI。
+打包的 `local_panel` 只有两只股票，晋升时会打上 `thin_panel`。HTTP `POST /api/v1/review/{id}/approve` 如果带了 `override`，固定返回 403。这两只股票要进 pool，请用上面最后那一行 CLI。
 
 ### 3.7 打开工作台
 
@@ -165,7 +165,7 @@ finaince serve --host 127.0.0.1 --port 8000
 
 ### 4.2 Review
 
-这里列的是待审晋升。图里这一条方向是 `to_pool`、状态是 `pending`，门禁失败原因是 `thin_panel`。页面上的 **Approve** 不会附带 override，点下去仍会失败。要放行薄面板，请回到终端执行 `finaince review --approve … --override thin_panel`。
+这里列的是待审晋升。图里这一条方向是 `to_pool`、状态是 `pending`，门禁失败原因是 `thin_panel`。页面上的 **Approve** 不会附带 override，点下去仍会失败。要在股票不足 20 只时放行，请回到终端执行 `finaince review --approve … --override thin_panel`。
 
 ![Review 队列因 thin_panel 拒批](handbook/images/03-review.png)
 
@@ -208,7 +208,7 @@ finaince --help
 | 命令 | 做什么 |
 |---|---|
 | `doctor` | 检查家目录、import、panel、qlib child、LLM |
-| `baseline` | 跑锁定的安装冒烟窗口 |
+| `baseline` | 用自带的两只股票跑一遍固定窗口 |
 | `eval EXPR --dialect repro_polars\|qlib --backend local\|ricequant` | 按方言和数据后端评测 |
 | `validate EXPR` | 用 polars 引擎校验表达式 |
 | `impl PATH.py --name … --universe local_panel` | 隔离执行 `compute(panel)`，写入 catalog |
@@ -267,7 +267,7 @@ Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINC
 | `FINAINCE_DESK_TOKEN` | 工作台和写操作 HTTP |
 | `FINAINCE_DATA_SOURCE=local` | 走本地 panel |
 | `FINAINCE_PDF_ROOT` | HTTP 复现允许的目录 |
-| `FINAINCE_PACKAGED_SPA=1` | 强制使用占位页 |
+| `FINAINCE_PACKAGED_SPA=1` | 只用 wheel 里那张简单首页 |
 | `FINAINCE_ALLOW_PUBLIC_BIND=1` | 允许绑定 `0.0.0.0` |
 | `FINAINCE_PATH_HACK=1` | 使用作者树旁边的源码 |
 | `FINAINCE_NO_PATH_HACK=1` | CI 和陌生人安装时关掉旁路 |
@@ -294,4 +294,4 @@ clone 下来之后，本机就能跑 catalog、eval、CLI review，复现仓库�
 
 要拿它评真正的因子，还得自己准备：编好的前端 dist、至少 20 只股票的行情，米筐或本地数据都行。要从券商 PDF 里抽公式、跑 swarm，还需要 LLM。
 
-对外引用冒烟 IC / Sharpe 时，请一并带上 `claim` 里的那句：*install smoke local_panel fixture; cost 0 bps*。
+如果把 `baseline` 的 IC / Sharpe 写进对外材料，请一并带上 JSON 里 `claim` 那一句，说明数据来自自带的两只股票、成本 0 bps。

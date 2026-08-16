@@ -10,7 +10,7 @@ FinAlpha 管卖方研报里的选股因子：收进 catalog，在本地 panel �
 
 ![填好 desk token 后的 Catalog](docs/handbook/images/01-catalog.png)
 
-安装冒烟数字来自 `finaince baseline`：universe 为 `local_panel`，成本 0 bps，表达式为 `Rank(Delta(close, 1))`。这是两只股票的夹具。
+`finaince baseline` 用包装里两只股票的 `local_panel` 跑一遍：成本 0 bps，表达式 `Rank(Delta(close, 1))`。数字只说明安装有没有跑通。
 
 许可证：[GNU Affero General Public License v3.0](LICENSE)。版权和第三方引擎见 [NOTICE](NOTICE)。
 
@@ -32,11 +32,11 @@ finaince doctor
 
 可选 extras：`.[agent]`（Claude Agent SDK）、`.[dev]`（pytest）、`.[all]`。
 
-wheel 里带的是占位工作台（`finaince/web/index.html`）。完整的 Catalog / Review 界面需要编好的 `aiminer/frontend/dist`。旁边已有 dist 时，设 `FINAINCE_PACKAGED_SPA=1` 仍可强制用占位页。
+wheel 里只有一张简单首页（`finaince/web/index.html`）。完整的 Catalog / Review 界面需要编好的 `aiminer/frontend/dist`。旁边已有 dist 时，设 `FINAINCE_PACKAGED_SPA=1` 仍可只用那张简单页。
 
-## 十五分钟路径（仓库内夹具）
+## 十五分钟路径（仓库里的示例）
 
-用的是随包装好的薄 `local_panel`。下面每条都是真实 CLI。[手册](docs/handbook.md) 按同一条路径配了截图。
+用的是包装里那两只股票的 `local_panel`。下面每条都是真实 CLI。[手册](docs/handbook.md) 按同一条路径配了截图。
 
 ```bash
 finaince doctor
@@ -50,11 +50,11 @@ finaince review --approve '<promotion_id>' --override thin_panel
 finaince serve --host 127.0.0.1 --port 8000
 ```
 
-HTTP `POST /api/v1/review/{id}/approve` 若带上 `{"override":[...]}`，固定返回 403。冒烟面板要进 pool，请用上面的 CLI `--override thin_panel`。行偏薄、用了公式代理、或缺 IC / 收益时，晋升会停在待审或直接失败。
+HTTP `POST /api/v1/review/{id}/approve` 若带上 `{"override":[...]}`，固定返回 403。这两只股票要进 pool，请用上面的 CLI `--override thin_panel`。股票太少、用了公式代理、或缺 IC / 收益时，晋升会停在待审或直接失败。
 
-## 安装冒烟 baseline
+## baseline
 
-`finaince baseline`（以及 `run_locked_baseline()`）把窗口锁在打包的两只股票 panel 上：
+`finaince baseline`（以及 `run_locked_baseline()`）窗口锁在包装里的两只股票上：
 
 | 字段 | 值 |
 |---|---|
@@ -64,16 +64,16 @@ HTTP `POST /api/v1/review/{id}/approve` 若带上 `{"override":[...]}`，固定�
 | 表达式 | `Rank(Delta(close, 1))` |
 | 方言 | `repro_polars` |
 
-连续跑两次，`ok` 以及报出的 IC / Sharpe 必须一致。对外声明里会写明这是 `local_panel` 冒烟夹具、成本 0 bps。股票数少于 20 时，晋升会因 `thin_panel` 停下。
+连续跑两次，`ok` 以及报出的 IC / Sharpe 必须一致。对外写数字时请说明：数据来自自带的 `local_panel`，成本 0 bps。股票数少于 20 时，晋升会因 `thin_panel` 停下。
 
 ## 能力
 
 - 同一张台上完成 catalog → eval → 门禁晋升 / 审核
 - 用 `reproagent` 和 `finpdfpro` 复现研报（版面和公式）
-- 在随包装好的 `local_panel` 上跑锁定冒烟窗口（0 bps）
+- 用包装里的 `local_panel` 跑固定窗口（0 bps）
 - 3.12 slim extra 上通过进程内 local child 跑 `qlib` 方言
 
-和邻近工具比：RD-Agent 通宵自己跑 Qlib CSI300；FinAlpha 让你自己审目录和研报，并写明冒烟窗口用的是 `local_panel`、成本 0 bps。Qlib 公开数字来自长窗口 CSI300；这里发表的是这份锁定冒烟窗口。
+和邻近工具比：RD-Agent 通宵自己跑 Qlib CSI300；FinAlpha 让你自己审目录和研报，并写明这组数字来自 `local_panel`、成本 0 bps。Qlib 公开数字来自长窗口 CSI300；这里发表的是这份固定短窗口。
 
 ## 测试
 
