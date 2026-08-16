@@ -2,6 +2,8 @@
 
 Public repository: https://github.com/WeissHymmnos/finaince
 
+Product handbook (tutorial + screenshots): [docs/handbook.md](docs/handbook.md).
+
 ## Before a PR
 
 1. Fork or branch from `main`.

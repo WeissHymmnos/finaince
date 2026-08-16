@@ -4,13 +4,17 @@ Fail-closed research desk for **China sell-side factor work**: catalog a candida
 
 The installable package name is `finaince`. The product name is **FinAlpha**.
 
-The install smoke figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`. It is a two-name fixture, not a wide-universe research sample.
+**[Product handbook](docs/handbook.md)** — full tutorial, CLI reference, HTTP contract, and workbench screenshots.
+
+![Catalog with a desk token](docs/handbook/images/01-catalog.png)
+
+The install smoke figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`. It is a two-name fixture.
 
 License: [GNU Affero General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for copyright and third-party engines.
 
 ## Public install (Python 3.12)
 
-You only need this public repository. Engines resolve from public GitHub at pinned commits (see `pyproject.toml` extras). No private token, no author `Documents/` layout, no `../reproagent` checkout. Sibling `src` injection stays off unless you set `FINAINCE_PATH_HACK=1`.
+You only need this public repository. Engines resolve from public GitHub at pinned commits (see `pyproject.toml` extras). Sibling `src` injection stays off unless you set `FINAINCE_PATH_HACK=1`.
 
 ```bash
 git clone https://github.com/WeissHymmnos/finaince.git
@@ -18,49 +22,33 @@ cd finaince
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install -e ".[reproduction]"
-cp .env.example .env   # then set FINAINCE_DESK_TOKEN before `finaince serve`
+cp .env.example .env   # set FINAINCE_DESK_TOKEN before `finaince serve`
 finaince doctor
 ```
 
-`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install. Mutation HTTP and catalog/review reads (`finaince serve`) require `FINAINCE_DESK_TOKEN`. Bind default is `127.0.0.1:8000`. Binding `0.0.0.0` needs `FINAINCE_ALLOW_PUBLIC_BIND=1`.
+`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install. Catalog/review reads and mutation HTTP require `FINAINCE_DESK_TOKEN`. Bind default is `127.0.0.1:8000`. Binding `0.0.0.0` needs `FINAINCE_ALLOW_PUBLIC_BIND=1`.
 
-Optional extras:
-
-- `.[agent]` — Claude Agent SDK research desk
-- `.[dev]` — pytest
-- `.[all]` — reproduction + discovery + agent
+Optional extras: `.[agent]` (Claude Agent SDK), `.[dev]` (pytest), `.[all]`.
 
 The wheel ships a stub workbench (`finaince/web/index.html`). A full Catalog/Review UI needs a built `aiminer/frontend/dist`. `FINAINCE_PACKAGED_SPA=1` forces the stub when a sibling dist is present.
 
 ## 15-minute path (in-repo fixture)
 
-Uses the shipped thin `local_panel` parquet. Every command below is a real CLI entry.
+Uses the shipped thin `local_panel` parquet. Every command is a real CLI entry. The [handbook](docs/handbook.md) walks the same path with screenshots.
 
 ```bash
-# 1. Health
 finaince doctor
-
-# 2. Install-smoke baseline (locked window / universe / cost / expression)
 finaince baseline
-
-# 3. Same expression through the eval router
 finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
-
-# 4. qlib dialect on 3.12 uses the in-process local child (packaged panel if
-#    ~/Documents/Data has trade_date/ts_code only)
 finaince eval 'Rank($close)' --dialect qlib --backend local
-
-# 5. Isolated compute(panel) on the fixture → catalog row
 finaince impl examples/15min/compute.py --name rank_delta --universe local_panel
-
-# 6. Promote → review. The two-name panel fail-closes on thin_panel.
-#    Copy catalog_id from the impl JSON, then:
 finaince promote '<catalog_id>' --to to_pool --yes
 finaince review
 finaince review --approve '<promotion_id>' --override thin_panel
+finaince serve --host 127.0.0.1 --port 8000
 ```
 
-HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. The documented success path onto the smoke panel is the CLI `--override thin_panel` line above. Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns.
+HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. The documented success path onto the smoke panel is the CLI `--override thin_panel` line. Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns.
 
 ## Install-smoke baseline
 

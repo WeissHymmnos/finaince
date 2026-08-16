@@ -74,6 +74,19 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "local_panel" in readme
     assert "finaince baseline" in readme
     assert "finaince impl examples/15min/compute.py" in readme
+    assert "docs/handbook.md" in readme
+    handbook = ROOT / "docs" / "handbook.md"
+    assert handbook.is_file()
+    handbook_text = handbook.read_text()
+    assert "finaince review --approve" in handbook_text
+    shots = ROOT / "docs" / "handbook" / "images"
+    for name in (
+        "01-catalog.png",
+        "03-review.png",
+        "04-reproduce.png",
+        "12-catalog-no-token.png",
+    ):
+        assert (shots / name).is_file(), name
     assert "WeissHymmnos/finaince" in contributing
     assert 'uv pip install -e ".[reproduction,dev]"' in contributing
     assert (ROOT / "examples" / "15min" / "compute.py").is_file()
