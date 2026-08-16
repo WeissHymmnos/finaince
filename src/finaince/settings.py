@@ -30,7 +30,7 @@ class FinainceSettings(BaseSettings):
     home: Path = Field(default_factory=lambda: Path("~/.finaince").expanduser())
     catalog_enabled: bool = True
     auto_promote: bool = False
-    default_data_backend: str = "ricequant"
+    default_data_backend: str = "local"
     local_data_path: Path | None = None
     llm_provider: str | None = "deepseek"
     llm_api_key: str = ""
@@ -71,6 +71,9 @@ class FinainceSettings(BaseSettings):
             os.environ.setdefault("AIMINER_LOCAL_DATA_PATH", str(data))
             os.environ.setdefault("LOCAL_DATA_PATH", str(data))
         os.environ.setdefault("FINAINCE_HOME", str(self.home))
+        from finaince.auth import align_aiminer_auth_env
+
+        align_aiminer_auth_env()
         if self.pdf_root:
             os.environ.setdefault("FINAINCE_PDF_ROOT", str(self.pdf_root))
         llm = resolve_deepseek_llm()
@@ -304,15 +307,32 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         audit = verify_tail()
     from finaince.eval.qlib_subprocess import qlib_subprocess_enabled
     from finaince.isolate import isolator_available
-    from finaince.runtime import aiminer_python
+    from finaince.runtime import aiminer_python, packaged_local_panel, qlib_local_data_path
 
     isolator = isolator_available()
     qlib_py = (aiminer_python() or os.environ.get("AIMINER_PYTHON") or "").strip()
-    qlib_child = {
-        "ok": bool(qlib_subprocess_enabled() and qlib_py and Path(qlib_py).expanduser().is_file()),
-        "enabled": qlib_subprocess_enabled(),
-        "python": qlib_py or None,
-    }
+    child_importable = False
+    try:
+        from aiminer.core.qlib_child import run_request  # noqa: F401
+
+        child_importable = True
+    except Exception:
+        child_importable = False
+    if qlib_subprocess_enabled():
+        qlib_child = {
+            "ok": bool(qlib_py and Path(qlib_py).expanduser().is_file()),
+            "enabled": True,
+            "via": "qlib_subprocess",
+            "python": qlib_py or None,
+        }
+    else:
+        panel = qlib_local_data_path() or packaged_local_panel()
+        qlib_child = {
+            "ok": bool(child_importable and panel is not None),
+            "enabled": True,
+            "via": "qlib_child",
+            "python": None,
+        }
     if not isolator.get("ok"):
         ok = False
         issues.append(f"isolator unavailable: {isolator.get('error')}")

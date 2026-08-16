@@ -392,7 +392,9 @@ def test_serve_health_and_catalog_and_aiminer_prefix(isolated_home: Path) -> Non
     assert "FinAlpha" in root.text
     assert "spa disabled" not in root.text.lower()
     assert "frontend not built" not in root.text.lower()
-    c = client.get("/api/v1/catalog")
+    from tests.conftest import desk_headers
+
+    c = client.get("/api/v1/catalog", headers=desk_headers())
     assert c.status_code == 200
     assert "items" in c.json()
     legacy = client.get("/api/health")
@@ -490,6 +492,8 @@ def test_serve_review_route(isolated_home: Path) -> None:
     from finaince.serve import create_app
 
     client = TestClient(create_app())
-    r = client.get("/api/v1/review")
+    from tests.conftest import desk_headers
+
+    r = client.get("/api/v1/review", headers=desk_headers())
     assert r.status_code == 200
     assert "items" in r.json()

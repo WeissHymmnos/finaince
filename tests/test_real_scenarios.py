@@ -186,13 +186,13 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
         assert health.status_code == 200
         assert health.json()["product"] == "FinAlpha"
 
-        catalog = httpx.get(f"{base}/api/v1/catalog", timeout=5.0)
+        from tests.conftest import desk_headers
+
+        catalog = httpx.get(f"{base}/api/v1/catalog", timeout=5.0, headers=desk_headers())
         assert catalog.status_code == 200
         cat_body = catalog.json()
         assert cat_body["count"] >= 1
         assert any(item["lineage"]["source"] == "reproduction" for item in cat_body["items"])
-
-        from tests.conftest import desk_headers
 
         ev = httpx.post(
             f"{base}/api/v1/eval",
@@ -205,7 +205,7 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
         assert ev_body["ok"] is True
         assert ev_body["metrics"]
 
-        jobs = httpx.get(f"{base}/api/v1/jobs", timeout=5.0)
+        jobs = httpx.get(f"{base}/api/v1/jobs", timeout=5.0, headers=desk_headers())
         assert jobs.status_code == 200
         assert jobs.json()["count"] >= 1
 
@@ -214,7 +214,7 @@ def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
         promo_body = _json_line(promo.stdout)
         pid = promo_body["promotion_id"]
 
-        queue = httpx.get(f"{base}/api/v1/review", timeout=5.0)
+        queue = httpx.get(f"{base}/api/v1/review", timeout=5.0, headers=desk_headers())
         assert queue.status_code == 200
         assert any(item["id"] == pid for item in queue.json()["items"])
 

@@ -14,6 +14,43 @@ def configured_desk_token() -> str:
     ).strip()
 
 
+def align_aiminer_auth_env() -> str:
+    """Copy the desk token onto AIMINER_AUTH_TOKEN before aiminer.api loads."""
+    token = configured_desk_token()
+    if token:
+        os.environ["AIMINER_AUTH_TOKEN"] = token
+    return token
+
+
+def public_bind_allowed() -> bool:
+    return os.environ.get("FINAINCE_ALLOW_PUBLIC_BIND", "").strip() == "1"
+
+
+def validate_serve_host(host: str) -> str:
+    """Loopback only unless FINAINCE_ALLOW_PUBLIC_BIND=1."""
+    raw = (host or "").strip() or "127.0.0.1"
+    lowered = raw.lower()
+    if lowered in {"127.0.0.1", "localhost", "::1"}:
+        return raw
+    if public_bind_allowed():
+        return raw
+    raise ValueError(
+        f"refusing to bind {raw!r}; use 127.0.0.1 or set FINAINCE_ALLOW_PUBLIC_BIND=1"
+    )
+
+
+def cors_origins() -> list[str]:
+    raw = (os.environ.get("FINAINCE_CORS_ORIGINS") or "").strip()
+    if raw:
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    return [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+
+
 def token_from_headers(headers: dict[str, str] | None) -> str:
     raw = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
     auth = raw.get("authorization") or ""

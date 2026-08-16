@@ -58,7 +58,7 @@ FinAlpha 是**中国卖方研究台**：人打开 `finaince serve`，用 catalog
 - **平台壳**：`FactorRecord` catalog、`(dialect, backend)` eval、`promote → review → approve` fail-closed（`thin_panel` / `formula_proxy` / 空 IC / 空收益 / 相关）、JobRunner、同源 `/` + `/api/v1`、`finaince doctor`。
 - **Agent**：Claude Agent SDK + 进程内工具 + 发现/复现/复核三个 specialist。**一次 query，不是过夜 R/D 环。**
 - **知识**：chroma RAG + wiki vault + reproagent `report_knowledge` / feedback。**另有** `trace_events`：eval / job（reproduce、swarm、impl、loop）追加一条，后一条 `cites` 前一条 id。还不是带 hypothesis 正文的研发树。
-- **qlib**：3.12 上 `POST /api/v1/eval dialect=qlib` **诚实 `ok: false`**（占位或子进程）。doctor / health 报告 `isolator`、`qlib_child`。
+- **qlib**：3.12 上 `eval --dialect qlib` 走 in-process `qlib_child`（schema 不对的 `~/Documents/Data` 回退打包 `local_panel`）。`FINAINCE_QLIB_SUBPROCESS=1` 才用 3.10 子进程。doctor / health 报告 `isolator`、`qlib_child.via`。
 - **工作台**：Catalog / Review / Reproduce / Agent / Swarm / Pool / Manual / Wiki 同源。
 - **已补骨架（2026-08-14）**：`finaince trace` / `GET /api/v1/trace`；`finaince impl` 冻结模块跑 `compute(panel)` 再 upsert catalog（仍过门禁）；`finaince loop` 交替 factor + thin long-short 组合曲线；空抽取 `no_factors`，能描述但译不了 `needs_impl`。
 
@@ -118,7 +118,7 @@ isolate / eval 错误写进 trace，但 coder 不会查「同类 ImportError 最
 | fail-closed 晋升 | RD-Agent 容易把「跑通的实验」当成可上线因子。本侧 `thin_panel` / `formula_proxy` / 空收益 是生产纪律。 |
 | 中文研报流水线 | LangChain 切 PDF 对付不了券商双栏、公式、扫描件。`finpdfpro` 是差异化，不要换成通用 loader。 |
 | 同源工作台 + doctor | RD-Agent 要 Docker 健康检查；研究员日常路径更短的是 `doctor` → `serve` → 点 Catalog。 |
-| 诚实失败 | `no_factors`、qlib `ok: false`、裸 `discover` 拒绝伪装。不要为了对齐论文把占位评测标成成功。 |
+| 诚实失败 | `no_factors`、裸 `discover` 拒绝伪装。qlib 本地 child 在可用 panel 上 `ok: true`；占位不再当作成功。 |
 | 算子沙箱作默认 | 完全放开「自己 pip install 再写任意 Python」会毁掉可审计性。代码补丁必须是可选、隔离、过门禁的一层。 |
 | 泛化成 Kaggle / 微调 LLM | RD-Agent 的广度不是量化台的 KPI。 |
 

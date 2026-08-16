@@ -120,11 +120,11 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
     assert isinstance(body["ok"], bool)
     assert isinstance(body["degraded"], bool)
 
-    listed = _json_not_html(client.get("/api/v1/catalog"))
+    listed = _json_not_html(client.get("/api/v1/catalog", headers=desk_headers()))
     assert listed["count"] >= 1
     assert any(item["id"] == rec.id for item in listed["items"])
 
-    detail = _json_not_html(client.get(f"/api/v1/catalog/{rec.id}"))
+    detail = _json_not_html(client.get(f"/api/v1/catalog/{rec.id}", headers=desk_headers()))
     assert detail["id"] == rec.id
 
     promoted = _json_not_html(
@@ -137,7 +137,7 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
     assert promoted["ok"] is True
     assert promoted.get("promotion_id")
 
-    queue = _json_not_html(client.get("/api/v1/review"))
+    queue = _json_not_html(client.get("/api/v1/review", headers=desk_headers()))
     assert any(item["id"] == promoted["promotion_id"] for item in queue["items"])
     pending = next(item for item in queue["items"] if item["id"] == promoted["promotion_id"])
     assert "gates" in pending
@@ -185,7 +185,7 @@ def test_human_desk_walk(isolated_home: Path, sample_report_path: Path) -> None:
     )
     job_id = job.get("id")
     assert job_id
-    polled = _json_not_html(client.get(f"/api/v1/jobs/{job_id}"))
+    polled = _json_not_html(client.get(f"/api/v1/jobs/{job_id}", headers=desk_headers()))
     assert polled["id"] == job_id
 
     for method, path in (
@@ -241,7 +241,8 @@ def test_human_nav_when_aiminer_api_missing(isolated_home: Path, monkeypatch) ->
         "/api/v1/health",
         "/api/v1/trace",
     ):
-        _json_not_html(client.get(path))
+        headers = desk_headers() if path.startswith("/api/v1/") and path != "/api/v1/health" else None
+        _json_not_html(client.get(path, headers=headers))
     for route in ("/runs", "/pool", "/manual", "/strategy", "/wiki", "/ops"):
         page = client.get(route)
         assert page.status_code == 200, route

@@ -199,7 +199,7 @@ def test_http_detail_reject_jobs_qlib(isolated_home: Path) -> None:
     assert posted.status_code == 200
     promo = posted.json()
     assert promo["ok"] is True
-    detail = client.get(f"/api/v1/catalog/{rec.id}")
+    detail = client.get(f"/api/v1/catalog/{rec.id}", headers=desk_headers())
     assert detail.status_code == 200
     assert detail.json()["id"] == rec.id
     qlib = client.post(
@@ -233,7 +233,7 @@ def test_http_detail_reject_jobs_qlib(isolated_home: Path) -> None:
     from finaince.jobs.runner import submit
 
     job = submit("evaluate", {"expr": "x"}, run=lambda: {"ok": True})
-    got = client.get(f"/api/v1/jobs/{job['id']}")
+    got = client.get(f"/api/v1/jobs/{job['id']}", headers=desk_headers())
     assert got.status_code == 200
     assert got.json()["id"] == job["id"]
 
@@ -556,7 +556,7 @@ def test_http_async_reproduce_polls_parent_to_terminal(
     row = None
     deadline = time.time() + 90
     while time.time() < deadline:
-        got = client.get(f"/api/v1/jobs/{job_id}")
+        got = client.get(f"/api/v1/jobs/{job_id}", headers=desk_headers())
         assert got.status_code == 200
         row = got.json()
         if row.get("status") not in {"running", "queued"}:

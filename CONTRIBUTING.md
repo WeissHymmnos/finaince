@@ -13,9 +13,10 @@ Public repository: https://github.com/WeissHymmnos/finaince
    uv pip install -e ".[reproduction,dev]"
    ```
 
-3. Keep the documented install on public Git extras (`uv pip install -e ".[reproduction]"`). Checkout tokens and author-machine `../reproagent` paths stay out of docs and workflows.
-4. Keep promotion fail-closed: `thin_panel` (any universe when the loaded panel has fewer than 20 assets), `formula_proxy`, missing IC, and missing returns.
-5. The install-smoke baseline is `finaince baseline` on `local_panel` (locked window, 0 bps). It is not a wide-universe research sample.
+3. Keep the documented install on public Git extras (`uv pip install -e ".[reproduction]"`). Checkout tokens and author-machine `../reproagent` paths stay out of docs and workflows. Workflows checkout the same immutable SHAs as `pyproject.toml`.
+4. Keep promotion fail-closed: `thin_panel` (any universe when the loaded panel has fewer than 20 assets), `formula_proxy`, missing IC, and missing returns. HTTP approve cannot honor `override`; CLI `--override thin_panel` is the documented smoke-panel path.
+5. The install-smoke baseline is `finaince baseline` on `local_panel` (locked window, 0 bps). It is a two-name fixture.
+6. `finaince serve` binds 127.0.0.1 and requires `FINAINCE_DESK_TOKEN` for `/api/v1` reads and writes except health and the locked baseline.
 
 ## Checks that must pass
 

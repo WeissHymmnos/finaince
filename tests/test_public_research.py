@@ -48,7 +48,20 @@ def test_public_install_contract_has_no_private_token() -> None:
     assert "from aiminer.manager import cull_alpha_pool" in workflow
     assert "print('ok'" in workflow
     assert "18702585ed19f50c85c9dd9b023ebff2a09a56f7" in pyproject
-    assert "1b79d7be16647ae9bff423258ba08d4f0121ebd1" in pyproject
+    assert "99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa" in pyproject
+    assert "pyarrow" in pyproject
+    assert "--override thin_panel" in readme
+    assert "ok: false" not in readme
+    assert "FINAINCE_DESK_TOKEN" in readme
+    assert (ROOT / ".env.example").is_file()
+    assert "FINAINCE_DESK_TOKEN" in (ROOT / ".env.example").read_text()
+    assert (ROOT / "NOTICE").is_file()
+    assert "WeissHymmnos" in (ROOT / "NOTICE").read_text()
+    assert "18702585ed19f50c85c9dd9b023ebff2a09a56f7" in pytest_wf
+    assert "99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa" in pytest_wf
+    assert "fb5314833a816d40201fb1173a6afe6788dfba2c" in pytest_wf
+    assert "ref: finaince-312" not in pytest_wf
+    assert "ref: finaince-desk" not in pytest_wf
     assert "@finaince-desk" not in pyproject
     assert "@finaince-312" not in pyproject
     assert "allow-direct-references" in pyproject

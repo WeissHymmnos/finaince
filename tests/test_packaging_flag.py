@@ -43,5 +43,6 @@ def test_packaging_312_uses_public_git_extras() -> None:
     assert "from aiminer.manager import cull_alpha_pool" in workflow
     assert "print('ok'" in workflow
     assert "18702585ed19f50c85c9dd9b023ebff2a09a56f7" in pyproject
-    assert "1b79d7be16647ae9bff423258ba08d4f0121ebd1" in pyproject
+    assert "99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa" in pyproject
     assert "fb5314833a816d40201fb1173a6afe6788dfba2c" in pyproject
+    assert "pyarrow" in pyproject

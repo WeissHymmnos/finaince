@@ -59,7 +59,7 @@ def test_http_trace_after_two_desk_actions(isolated_home: Path) -> None:
     )
     assert ev2.status_code == 200
     assert ev2.json()["ok"] is True
-    listed = client.get("/api/v1/trace")
+    listed = client.get("/api/v1/trace", headers=desk_headers())
     assert listed.status_code == 200
     items = listed.json()["items"]
     assert len(items) >= 2
@@ -207,6 +207,7 @@ def test_doctor_reports_isolator_and_qlib_child(isolated_home: Path) -> None:
     assert "qlib_child" in doc
     assert isinstance(doc["isolator"].get("ok"), bool)
     assert isinstance(doc["qlib_child"].get("ok"), bool)
+    assert doc["qlib_child"].get("via") in {"qlib_child", "qlib_subprocess"}
     qlib = evaluate(EvalRequest(expression="Rank($close)", dialect="qlib"))
     assert qlib.ok is True
     assert qlib.error != "qlib_placeholder"

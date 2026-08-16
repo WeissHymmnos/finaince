@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn",
     "websockets",
     "httpx",
+    "pyarrow",
 ]
 
 [project.optional-dependencies]
@@ -29,11 +30,11 @@ dev = [
 ]
 reproduction = [
     "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@18702585ed19f50c85c9dd9b023ebff2a09a56f7",
-    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@1b79d7be16647ae9bff423258ba08d4f0121ebd1",
+    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa",
     "finreportparser @ git+https://github.com/WeissHymmnos/finpdfpro.git@fb5314833a816d40201fb1173a6afe6788dfba2c",
 ]
 discovery = [
-    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@1b79d7be16647ae9bff423258ba08d4f0121ebd1",
+    "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa",
 ]
 agent = [
     "claude-agent-sdk>=0.1.0",
@@ -57,6 +58,7 @@ packages = ["src/finaince"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/finaince/data/local_panel/prices.parquet" = "finaince/data/local_panel/prices.parquet"
 "src/finaince/web/index.html" = "finaince/web/index.html"
+"NOTICE" = "finaince/NOTICE"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

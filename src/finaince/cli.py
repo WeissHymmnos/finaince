@@ -453,9 +453,10 @@ def serve_cmd(
     port: int = typer.Option(8000, "--port"),
 ) -> None:
     """Same-origin workbench + /api/v1 (and aiminer /api when available)."""
+    from finaince.auth import validate_serve_host
     from finaince.serve import main as serve_main
 
-    serve_main(host=host, port=port)
+    serve_main(host=validate_serve_host(host), port=port)
 
 
 @app.command("trace")

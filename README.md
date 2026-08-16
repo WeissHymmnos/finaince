@@ -6,7 +6,7 @@ The installable package name is `finaince`. The product name is **FinAlpha**.
 
 The install smoke figure is the locked local-panel baseline (`finaince baseline`): universe `local_panel`, cost 0 bps, expression `Rank(Delta(close, 1))`. It is a two-name fixture, not a wide-universe research sample.
 
-License: [GNU Affero General Public License v3.0](LICENSE).
+License: [GNU Affero General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for copyright and third-party engines.
 
 ## Public install (Python 3.12)
 
@@ -18,10 +18,11 @@ cd finaince
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install -e ".[reproduction]"
+cp .env.example .env   # then set FINAINCE_DESK_TOKEN before `finaince serve`
 finaince doctor
 ```
 
-`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install. Mutation HTTP (`finaince serve`) requires `FINAINCE_DESK_TOKEN`.
+`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install. Mutation HTTP and catalog/review reads (`finaince serve`) require `FINAINCE_DESK_TOKEN`. Bind default is `127.0.0.1:8000`. Binding `0.0.0.0` needs `FINAINCE_ALLOW_PUBLIC_BIND=1`.
 
 Optional extras:
 
@@ -29,7 +30,7 @@ Optional extras:
 - `.[dev]` — pytest
 - `.[all]` — reproduction + discovery + agent
 
-Bind default for `finaince serve` is `127.0.0.1:8000`.
+The wheel ships a stub workbench (`finaince/web/index.html`). A full Catalog/Review UI needs a built `aiminer/frontend/dist`. `FINAINCE_PACKAGED_SPA=1` forces the stub when a sibling dist is present.
 
 ## 15-minute path (in-repo fixture)
 
@@ -45,16 +46,21 @@ finaince baseline
 # 3. Same expression through the eval router
 finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
 
-# 4. Isolated compute(panel) on the fixture → catalog row
+# 4. qlib dialect on 3.12 uses the in-process local child (packaged panel if
+#    ~/Documents/Data has trade_date/ts_code only)
+finaince eval 'Rank($close)' --dialect qlib --backend local
+
+# 5. Isolated compute(panel) on the fixture → catalog row
 finaince impl examples/15min/compute.py --name rank_delta --universe local_panel
 
-# 5. Promote → review (fail-closed: thin_panel / formula_proxy / missing IC / missing returns)
+# 6. Promote → review. The two-name panel fail-closes on thin_panel.
 #    Copy catalog_id from the impl JSON, then:
 finaince promote '<catalog_id>' --to to_pool --yes
 finaince review
+finaince review --approve '<promotion_id>' --override thin_panel
 ```
 
-Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns. `qlib` on the 3.12 slim install reports `ok: false` until a real 3.10 subprocess is enabled.
+HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. The documented success path onto the smoke panel is the CLI `--override thin_panel` line above. Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns.
 
 ## Install-smoke baseline
 
@@ -75,6 +81,7 @@ Two consecutive runs must agree on `ok` and the reported IC/Sharpe. The claim na
 - Catalog → eval → fail-closed promote/review on one desk
 - 研报复现 via `reproagent` and `finpdfpro` (layout and formulas)
 - Locked smoke-window eval on the shipped `local_panel` fixture (0 bps)
+- `qlib` dialect on the 3.12 slim extra via the in-process local child
 
 Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity and a declared local-panel smoke baseline. Qlib's public figures use long CSI300 windows; FinAlpha publishes the locked `local_panel` smoke window and 0 bps cost.
 

@@ -238,3 +238,53 @@ def test_isolate_blocks_open_and_does_not_fabricate_returns(isolated_home: Path,
     assert rec.metrics.ic is None
     assert rec.is_simulated is True
     assert not any(str(k).startswith("2024-01-") for k in rec.daily_returns)
+
+
+def test_read_routes_require_desk_token(isolated_home: Path) -> None:
+    client = _client(isolated_home)
+    for path in (
+        "/api/v1/catalog",
+        "/api/v1/review",
+        "/api/v1/jobs",
+        "/api/v1/audit",
+        "/api/v1/trace",
+    ):
+        denied = client.get(path)
+        assert denied.status_code == 401, path
+        ok = client.get(path, headers=desk_headers())
+        assert ok.status_code == 200, (path, ok.text[:200])
+    assert client.get("/api/v1/health").status_code == 200
+    assert client.get("/api/v1/baseline").status_code == 200
+
+
+def test_serve_host_and_cors_and_default_backend() -> None:
+    from finaince.auth import cors_origins, validate_serve_host
+    from finaince.settings import FinainceSettings
+
+    assert validate_serve_host("127.0.0.1") == "127.0.0.1"
+    assert validate_serve_host("localhost") == "localhost"
+    try:
+        validate_serve_host("0.0.0.0")
+    except ValueError as exc:
+        assert "FINAINCE_ALLOW_PUBLIC_BIND" in str(exc)
+    else:
+        raise AssertionError("0.0.0.0 must be rejected")
+    origins = cors_origins()
+    assert "http://127.0.0.1:8000" in origins
+    assert "*" not in origins
+    assert FinainceSettings().default_data_backend == "local"
+
+
+def test_aiminer_auth_is_aligned_when_desk_token_set(isolated_home: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FINAINCE_DESK_TOKEN", DESK_TOKEN)
+    monkeypatch.delenv("AIMINER_DISABLE_AUTH", raising=False)
+    client = _client(isolated_home)
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    denied_catalog = client.get("/api/v1/catalog")
+    assert denied_catalog.status_code == 401
+    swarm = client.get("/api/swarm/status")
+    if health.json().get("auth_disabled") is False:
+        assert swarm.status_code == 401
+    else:
+        assert swarm.status_code == 200

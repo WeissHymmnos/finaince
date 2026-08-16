@@ -15,20 +15,21 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: WeissHymmnos/ReproAgent
-          ref: finaince-desk
+          ref: 18702585ed19f50c85c9dd9b023ebff2a09a56f7
           path: reproagent
           persist-credentials: false
       - name: Checkout public slim aiminer
         uses: actions/checkout@v4
         with:
           repository: WeissHymmnos/aiminer
-          ref: finaince-312
+          ref: 99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa
           path: aiminer
           persist-credentials: false
       - name: Checkout public finpdfpro
         uses: actions/checkout@v4
         with:
           repository: WeissHymmnos/finpdfpro
+          ref: fb5314833a816d40201fb1173a6afe6788dfba2c
           path: finpdfpro
           persist-credentials: false
       - uses: astral-sh/setup-uv@v4

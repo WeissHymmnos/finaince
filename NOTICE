@@ -1,0 +1,16 @@
+FinAlpha (installable package: finaince)
+Copyright (C) 2026 WeissHymmnos
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+See LICENSE for the full AGPL-3.0 text.
+
+Third-party engines resolved from public Git extras (pinned SHAs in
+pyproject.toml):
+
+- aiminer — WeissHymmnos/aiminer (AGPL-3.0)
+- ReproAgent — WeissHymmnos/ReproAgent (AGPL-3.0)
+- finpdfpro / finreportparser — WeissHymmnos/finpdfpro (AGPL-3.0)

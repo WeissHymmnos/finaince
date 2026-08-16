@@ -100,11 +100,11 @@ def test_human_workbench_reads_are_html_and_json(isolated_home: Path) -> None:
     assert health.status_code == 200
     assert "json" in health.headers.get("content-type", "")
     assert health.json()["product"] == "FinAlpha"
-    catalog = client.get("/api/v1/catalog")
+    catalog = client.get("/api/v1/catalog", headers=desk_headers())
     assert catalog.status_code == 200
     assert "json" in catalog.headers.get("content-type", "")
     assert "items" in catalog.json()
-    review = client.get("/api/v1/review")
+    review = client.get("/api/v1/review", headers=desk_headers())
     assert review.status_code == 200
     assert "json" in review.headers.get("content-type", "")
     assert "items" in review.json()
@@ -148,7 +148,7 @@ def test_human_mutation_loop_on_served_app(isolated_home: Path, sample_report_pa
     assert posted.status_code == 200
     promo = posted.json()
     assert promo["ok"] is True
-    queue = client.get("/api/v1/review").json()
+    queue = client.get("/api/v1/review", headers=desk_headers()).json()
     assert any(item["id"] == promo["promotion_id"] for item in queue["items"])
     rejected = client.post(
         f"/api/v1/review/{promo['promotion_id']}/reject",
@@ -185,7 +185,7 @@ def test_human_mutation_loop_on_served_app(isolated_home: Path, sample_report_pa
     assert job.status_code == 200, job.text
     job_id = job.json().get("id")
     assert job_id
-    polled = client.get(f"/api/v1/jobs/{job_id}")
+    polled = client.get(f"/api/v1/jobs/{job_id}", headers=desk_headers())
     assert polled.status_code == 200
     assert polled.json()["id"] == job_id
 

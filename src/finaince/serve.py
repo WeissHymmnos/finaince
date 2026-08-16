@@ -123,6 +123,9 @@ def create_app() -> Any:
     settings.apply_engine_env()
     import os
 
+    from finaince.auth import align_aiminer_auth_env, cors_origins
+
+    desk_token = align_aiminer_auth_env()
     os.environ["AIMINER_INCLUDE_SPA"] = "1" if settings.serve_spa else "0"
     app = FastAPI(title=settings.product_name, version="0.1.0")
 
@@ -135,10 +138,10 @@ def create_app() -> Any:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins(),
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     )
 
     @app.get("/api/v1/health")
@@ -159,14 +162,21 @@ def create_app() -> Any:
         }
 
     @app.get("/api/v1/catalog")
-    def catalog(source: str | None = None, query: str = "", style: str | None = None) -> dict[str, Any]:
+    def catalog(
+        request: Request,
+        source: str | None = None,
+        query: str = "",
+        style: str | None = None,
+    ) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
 
         items = FactorCatalog().list(source=source, query=query, style=style)
         return {"items": [i.model_dump(mode="json") for i in items], "count": len(items)}
 
     @app.get("/api/v1/catalog/{catalog_id}")
-    def catalog_detail(catalog_id: str, embed: str | None = None) -> dict[str, Any]:
+    def catalog_detail(request: Request, catalog_id: str, embed: str | None = None) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
 
         rec = FactorCatalog().get(catalog_id)
@@ -190,7 +200,8 @@ def create_app() -> Any:
         return promote(cid, direction=str(body.get("direction") or "to_pool"))
 
     @app.get("/api/v1/jobs/{job_id}")
-    def job_detail(job_id: str) -> dict[str, Any]:
+    def job_detail(request: Request, job_id: str) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.jobs.runner import get_job
 
         row = get_job(job_id)
@@ -199,14 +210,16 @@ def create_app() -> Any:
         return row
 
     @app.get("/api/v1/audit")
-    def audit_route(action: str | None = None) -> dict[str, Any]:
+    def audit_route(request: Request, action: str | None = None) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.catalog.audit import list_audit
 
         items = list_audit(action=action)
         return {"items": items, "count": len(items)}
 
     @app.get("/api/v1/jobs")
-    def jobs() -> dict[str, Any]:
+    def jobs(request: Request) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.jobs.runner import list_jobs
 
         rows = list_jobs()
@@ -242,7 +255,8 @@ def create_app() -> Any:
         }
 
     @app.get("/api/v1/review")
-    def review_queue() -> dict[str, Any]:
+    def review_queue(request: Request) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
 
         return {"items": FactorCatalog().list_promotions("pending")}
@@ -297,7 +311,8 @@ def create_app() -> Any:
         return run_research_desk(prompt, max_turns=int(body.get("max_turns") or 16))
 
     @app.get("/api/v1/trace")
-    def trace_route(limit: int = 50) -> dict[str, Any]:
+    def trace_route(request: Request, limit: int = 50) -> dict[str, Any]:
+        _require_desk(request)
         from finaince.trace import list_chain
 
         items = list_chain(limit=limit)
@@ -341,6 +356,15 @@ def create_app() -> Any:
         from aiminer.api import app as aiminer_app
 
         _align_aiminer_frontend_dist()
+        if desk_token:
+            import aiminer.api as aiminer_api
+
+            aiminer_api.AUTH_TOKEN = desk_token
+            aiminer_api.AUTH_DISABLED = os.getenv("AIMINER_DISABLE_AUTH", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
         app.include_router(aiminer_app.router)
     except Exception as exc:  # noqa: BLE001
         aiminer_error = str(exc)
@@ -367,10 +391,13 @@ def get_app() -> Any:
 def main(host: str | None = None, port: int | None = None) -> None:
     import uvicorn
 
+    from finaince.auth import validate_serve_host
+
     settings = get_settings()
+    bind = validate_serve_host(host or settings.serve_host)
     uvicorn.run(
         get_app(),
-        host=host or settings.serve_host,
+        host=bind,
         port=port or settings.serve_port,
         log_level="info",
     )
