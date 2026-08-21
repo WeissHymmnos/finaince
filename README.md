@@ -101,6 +101,15 @@ python -m pytest tests --ignore=tests/test_live_real.py
 
 Live PDF / RiceQuant / chat-LLM tests stay opt-in (`pytest -m live`) and are skipped without credentials.
 
+The governance modules (expr_ast, db, data_track, combination, code_evolution, corpus_campaign, brain_track, process_memory, domain scoring) carry an 82% coverage floor enforced in CI:
+
+```bash
+python -m pytest tests --ignore=tests/test_live_real.py \
+  --cov=finaince.expr_ast --cov=finaince.db --cov=finaince.data_track \
+  --cov=finaince.combination --cov=finaince.code_evolution --cov=finaince.corpus_campaign \
+  --cov=finaince.brain_track --cov=finaince.process_memory --cov=finaince.domain.scoring
+```
+
 ## Contribute
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

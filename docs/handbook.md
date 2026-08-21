@@ -222,7 +222,7 @@ finaince --help
 | `serve --host 127.0.0.1 --port 8000` | 打开同源工作台 |
 | `jobs [--cancel ID]` | 作业列表 / 取消 |
 | `trace [--limit N]` | 研究事件链（每条带 hypothesis） |
-| `loop [--steps N] [--expression EXPR]... [--sync/--async]` | 因子/模型交替环，支持表达式队列批量；模型步自动尝试跨 ready 因子动态组合（WS-I） |
+| `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 因子/模型交替环，支持表达式队列批量；模型步自动尝试跨 ready 因子动态组合（WS-I）；`--workers N`（1–8）对队列做进程级并行预评估 |
 | `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps）；`--sync` 需米筐凭据先抓缓存 |
 | `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
 | `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
@@ -288,7 +288,7 @@ finaince --help
 | `POST /api/v1/review/{id}/approve` 且 body 带 `{"override":[…]}` | **403** |
 | `POST /api/v1/review/{id}/approve` 且 body 带 `{"adversary":true}` | 允许；对抗评审拒绝时返回 `adversary_rejected`，行留在 review |
 | `POST /api/v1/review/{id}/adversary` | 只出 fresh-context 重评报告，不做决定 |
-| `POST /api/v1/loop` body 可带 `{"expressions":[…]}` 与 `{"sync":false}` | 批量表达式队列 + 异步 job |
+| `POST /api/v1/loop` body 可带 `{"expressions":[…]}`、`{"sync":false}` 与 `{"workers":1..8}` | 批量表达式队列 + 异步 job + 批内并行（worker 级失败按单表达式诚实落败） |
 | `POST /api/v1/reproduce` 且 PDF 不在 `FINAINCE_PDF_ROOT` 下 | **403** |
 
 Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINCE_DESK_TOKEN` 会同步到 `AIMINER_AUTH_TOKEN`，aiminer 的 `/api/*` 写操作同样要带这个口令。
