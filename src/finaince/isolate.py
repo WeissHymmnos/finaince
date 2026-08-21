@@ -51,6 +51,68 @@ def isolator_available() -> dict[str, Any]:
     return {"ok": True, "via": "subprocess", "python": str(py)}
 
 
+# --- WS-E: OS-level bubblewrap layer above the frozen-builtins child ---------
+
+
+def sandbox_mode() -> str:
+    raw = (os.environ.get("FINAINCE_SANDBOX") or "auto").strip().lower()
+    return raw if raw in {"auto", "bwrap", "off"} else "auto"
+
+
+def bwrap_available() -> bool:
+    import shutil
+
+    return shutil.which("bwrap") is not None
+
+
+def sandbox_backend() -> dict[str, Any]:
+    mode = sandbox_mode()
+    available = bwrap_available()
+    active = "bwrap" if (mode == "bwrap" or (mode == "auto" and available)) else "frozen_builtin"
+    return {
+        "mode": mode,
+        "bwrap_available": available,
+        "active": active,
+        "layers": ["frozen_builtin"] + (["bwrap"] if available else []),
+    }
+
+
+def _bwrap_binds() -> list[str]:
+    import finaince
+
+    candidates = {str(Path(sys.prefix).resolve())}
+    try:
+        candidates.add(str(Path(sys.executable).resolve().parent.parent))
+    except OSError:
+        pass
+    package_parent = str(Path(finaince.__file__).resolve().parent.parent)
+    candidates.add(package_parent)
+    return sorted(candidates)
+
+
+def _child_command() -> list[str]:
+    return [sys.executable, "-m", "finaince.isolate"]
+
+
+def _bwrap_command() -> list[str]:
+    argv = ["bwrap", "--unshare-all", "--share-net"]
+    for bind in _bwrap_binds():
+        argv += ["--ro-bind", bind, bind]
+    argv += [
+        "--tmpfs",
+        "/tmp",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--new-session",
+        "--die-with-parent",
+        "--",
+        *_child_command(),
+    ]
+    return argv
+
+
 _FORBIDDEN_SOURCE = ("open(", "eval(", "exec(", "compile(", "__import__(")
 
 
@@ -176,27 +238,49 @@ def run_isolated(
     )
     env = os.environ.copy()
     env["FINAINCE_ISOLATE"] = "1"
-    try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "finaince.isolate"],
-            input=payload,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            env=env,
-            check=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "skipped": True, "error": str(exc)}
-    if completed.returncode != 0:
-        err = (completed.stderr or completed.stdout or "isolate_child_failed")[:400]
-        out = {"ok": False, "error": err}
-        return _remember_isolate(out, name=name)
-    try:
-        parsed = json.loads(completed.stdout.strip().splitlines()[-1])
-    except (json.JSONDecodeError, IndexError) as exc:
-        parsed = {"ok": False, "error": f"isolate_bad_json: {exc}", "raw": completed.stdout[:400]}
-    return _remember_isolate(parsed, name=name)
+    mode = sandbox_mode()
+    use_bwrap = bwrap_available() and mode in {"auto", "bwrap"}
+    attempts: list[tuple[str, list[str]]] = []
+    if use_bwrap:
+        attempts.append(("bwrap", _bwrap_command()))
+    attempts.append(("frozen_builtin", _child_command()))
+    last_error: str | None = None
+    for layer, argv in attempts:
+        try:
+            completed = subprocess.run(
+                argv,
+                input=payload,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                env=env,
+                check=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_error = str(exc)
+            if layer == "bwrap":
+                continue
+            return {"ok": False, "skipped": True, "via": layer, "error": last_error}
+        if completed.returncode != 0:
+            err = (completed.stderr or completed.stdout or "isolate_child_failed")[:400]
+            if layer == "bwrap":
+                last_error = f"bwrap_layer_failed:{err[:200]}"
+                continue
+            out = {"ok": False, "via": layer, "error": err}
+            if use_bwrap:
+                out["sandbox_fallback"] = True
+                out["sandbox_fallback_reason"] = last_error
+            return _remember_isolate(out, name=name)
+        try:
+            parsed = json.loads(completed.stdout.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError) as exc:
+            parsed = {"ok": False, "error": f"isolate_bad_json: {exc}", "raw": completed.stdout[:400]}
+        parsed["via"] = layer
+        if layer == "frozen_builtin" and use_bwrap:
+            parsed["sandbox_fallback"] = True
+            parsed["sandbox_fallback_reason"] = last_error
+        return _remember_isolate(parsed, name=name)
+    return {"ok": False, "skipped": True, "error": last_error or "isolate_unreachable"}
 
 
 def error_prefix(error: str | None) -> str:
@@ -319,26 +403,6 @@ def _invoke_compute(ns: dict[str, Any], panel: dict[str, Any]) -> Any:
         return [float(v) for v in list(out)]
     except (TypeError, ValueError):
         return {"error": "compute_not_numeric"}
-
-
-def _naive_ic(values: list[float]) -> float:
-    if len(values) < 3:
-        return 0.0
-    fwd = [values[i] - values[i - 1] for i in range(1, len(values))]
-    mean = sum(fwd) / len(fwd)
-    var = sum((x - mean) ** 2 for x in fwd) / len(fwd)
-    if var <= 0:
-        return 0.0
-    # Rank-ish: correlation of level vs next increment, bounded.
-    levels = values[:-1]
-    lm = sum(levels) / len(levels)
-    num = sum((a - lm) * (b - mean) for a, b in zip(levels, fwd, strict=False))
-    den_a = sum((a - lm) ** 2 for a in levels) ** 0.5
-    den_b = sum((b - mean) ** 2 for b in fwd) ** 0.5
-    if den_a == 0 or den_b == 0:
-        return 0.0
-    corr = num / (den_a * den_b)
-    return float(max(-1.0, min(1.0, corr)))
 
 
 def main() -> None:
