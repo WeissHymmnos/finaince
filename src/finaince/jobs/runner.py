@@ -462,18 +462,35 @@ def _loop_dedup_key() -> str:
         return "loop:unknown"
 
 
-def run_loop_job(*, steps: int = 2, sync: bool = True, expressions: list[str] | None = None) -> dict[str, Any]:
+def run_loop_job(
+    *,
+    steps: int = 2,
+    sync: bool = True,
+    expressions: list[str] | None = None,
+    workers: int = 1,
+) -> dict[str, Any]:
     from finaince.loop import run_loop
 
-    payload = {"steps": int(steps), "expressions": expressions, "dedup_key": _loop_dedup_key()}
+    payload = {
+        "steps": int(steps),
+        "expressions": expressions,
+        "workers": max(1, min(8, int(workers))),
+        "dedup_key": _loop_dedup_key(),
+    }
     if not sync:
         argv = [sys.executable, "-m", "finaince", "loop", "--steps", str(steps), "--sync"]
         if expressions:
             for expr in expressions:
                 argv.extend(["--expression", expr])
+        if workers and int(workers) > 1:
+            argv.extend(["--workers", str(max(1, min(8, int(workers))))])
         return start_process(
             "research_loop",
             payload,
             argv,
         )
-    return submit("research_loop", payload, run=lambda: run_loop(steps=steps, expressions=expressions))
+    return submit(
+        "research_loop",
+        payload,
+        run=lambda: run_loop(steps=steps, expressions=expressions, workers=workers),
+    )

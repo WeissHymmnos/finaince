@@ -325,7 +325,42 @@ def train_linear_head(returns: dict[str, float]) -> dict[str, Any]:
     }
 
 
-def run_loop(*, steps: int = 2, expressions: list[str] | None = None) -> dict[str, Any]:
+def _failed_factor_step(expr: str, error: str) -> dict[str, Any]:
+    return {"action": "factor", "ok": False, "error": error, "metrics": {}, "daily_returns": {}}
+
+
+def _evaluate_batch(expressions: list[str], workers: int) -> dict[str, dict[str, Any]]:
+    """Evaluate a queue out-of-process; per-expression failures stay isolated."""
+    results: dict[str, dict[str, Any]] = {}
+    max_workers = max(1, min(int(workers), len(expressions)))
+    try:
+        from concurrent.futures import ProcessPoolExecutor
+        from multiprocessing import get_context
+
+        # Spawn, not fork: the parent may hold sqlite locks and engine threads
+        # that a forked child would inherit mid-flight.
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context("spawn")) as pool:
+            futures = {expr: pool.submit(run_factor_step, expr) for expr in expressions}
+            for expr, future in futures.items():
+                try:
+                    results[expr] = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    results[expr] = _failed_factor_step(expr, f"worker_failed:{exc}")
+    except Exception:  # noqa: BLE001  pool unavailable: sequential fallback
+        for expr in expressions:
+            try:
+                results[expr] = run_factor_step(expr)
+            except Exception as exc:  # noqa: BLE001
+                results[expr] = _failed_factor_step(expr, f"worker_failed:{exc}")
+    return results
+
+
+def run_loop(
+    *,
+    steps: int = 2,
+    expressions: list[str] | None = None,
+    workers: int = 1,
+) -> dict[str, Any]:
     """Two-step default: factor then model (or reverse if history already has factor)."""
     from finaince.trace import append_event, list_chain
 
@@ -339,7 +374,12 @@ def run_loop(*, steps: int = 2, expressions: list[str] | None = None) -> dict[st
     expressions_evaluated: list[dict[str, Any]] = []
     
     queue = list(expressions) if expressions is not None else ["Rank(Delta(close, 1))"]
-    
+
+    workers_n = max(1, int(workers))
+    precomputed: dict[str, dict[str, Any]] = {}
+    if workers_n > 1 and len(queue) > 1:
+        precomputed = _evaluate_batch(queue, workers_n)
+
     n = max(2, int(steps))
     for _ in range(n):
         advice = advise_action(history)
@@ -354,7 +394,7 @@ def run_loop(*, steps: int = 2, expressions: list[str] | None = None) -> dict[st
         chosen.append(action)
         if action == "factor":
             expr = queue.pop(0)
-            step = run_factor_step(expr)
+            step = precomputed.pop(expr, None) or run_factor_step(expr)
             last_factor = step
             factor_set = list(step.get("factor_set") or [])
             if not step.get("ok"):
@@ -373,6 +413,8 @@ def run_loop(*, steps: int = 2, expressions: list[str] | None = None) -> dict[st
             })
 
             extra = {"action": "factor", "via": via}
+            if workers_n > 1:
+                extra["workers"] = workers_n
             if "advisor_error" in advice:
                 extra["advisor_error"] = advice["advisor_error"]
 

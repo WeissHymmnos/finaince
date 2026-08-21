@@ -414,12 +414,17 @@ def create_app() -> Any:
 
         steps = int((body or {}).get("steps") or 2)
         sync = bool((body or {}).get("sync", True))
+        raw_workers = (body or {}).get("workers") or 1
+        try:
+            workers = max(1, min(8, int(raw_workers)))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "workers must be an integer") from None
         raw_exprs = (body or {}).get("expressions")
         expressions: list[str] | None = None
         if isinstance(raw_exprs, list):
             cleaned = [str(e).strip() for e in raw_exprs if str(e).strip()]
             expressions = cleaned or None
-        return run_loop_job(steps=steps, sync=sync, expressions=expressions)
+        return run_loop_job(steps=steps, sync=sync, expressions=expressions, workers=workers)
 
     _attach_workbench_root(app)
 

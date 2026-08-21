@@ -238,6 +238,34 @@ def test_desk_gate_default_deny_public_allowlist_and_preflight(isolated_home) ->
     assert preflight.status_code != 401
 
 
+def test_run_loop_workers_parallel_batch(monkeypatch, isolated_home) -> None:
+    import finaince.loop as loop_mod
+    from finaince.loop import run_loop
+
+    script = iter(["factor", "model", "factor", "model"])
+    monkeypatch.setattr(
+        loop_mod,
+        "advise_action",
+        lambda history: {"action": next(script), "hypothesis": "scripted step", "via": "test"},
+    )
+    out = run_loop(
+        steps=4,
+        expressions=["Rank(Delta(close, 1))", "Rank(Delta(close, 2))"],
+        workers=2,
+    )
+    assert out["ok"] is True, out
+    evaluated = {row["expression"]: row for row in out["expressions_evaluated"]}
+    assert set(evaluated) == {"Rank(Delta(close, 1))", "Rank(Delta(close, 2))"}
+    from finaince.trace import list_chain
+
+    factor_events = [
+        e for e in reversed(list_chain(limit=10)) if e.get("action") == "loop_factor"
+    ]
+    assert len(factor_events) >= 2
+    for event in factor_events[:2]:
+        assert (event.get("extra") or {}).get("workers") == 2
+
+
 BAD_SOURCE = """\
 NAME = 'evo_bad'
 EXPRESSION = ''

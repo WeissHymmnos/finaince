@@ -582,11 +582,18 @@ def loop_cmd(
         "--expression",
         help="Expressions to evaluate in factor steps (queue)",
     ),
+    workers: int = typer.Option(
+        1,
+        "--workers",
+        min=1,
+        max=8,
+        help="Parallel worker processes for batch expression evaluation",
+    ),
 ) -> None:
     """Alternate a factor step and a model step toward a portfolio metric."""
     from finaince.jobs.runner import run_loop_job
 
-    out = run_loop_job(steps=steps, sync=sync, expressions=expression)
+    out = run_loop_job(steps=steps, sync=sync, expressions=expression, workers=workers)
     typer.echo(json.dumps(out, default=str, ensure_ascii=False))
 
 
