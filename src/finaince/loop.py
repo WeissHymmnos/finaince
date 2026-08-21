@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 
 def choose_next_action(history: list[dict[str, Any]] | None = None) -> str:
-    """Pick factor vs model from prior portfolio metric / skip, not a blind flip."""
+    """Pick factor vs model from prior portfolio metric / skip, not a blind flip.
+
+    WS-I: when a net combo Sharpe is present it is the reward signal; the raw
+    portfolio_return sign stays the fallback for legacy histories.
+    """
     rows = list(history or [])
     if not rows:
         return "factor"
@@ -15,6 +21,8 @@ def choose_next_action(history: list[dict[str, Any]] | None = None) -> str:
     metrics = dict(last.get("metrics") or {})
     skip = last.get("skip_reason") or last.get("reason") or metrics.get("reason")
     port = metrics.get("portfolio_return")
+    sharpe_net = metrics.get("sharpe_net")
+    reward = sharpe_net if isinstance(sharpe_net, (int, float)) else port
     has_returns = bool(
         metrics.get("return_points")
         or metrics.get("rows")
@@ -25,10 +33,10 @@ def choose_next_action(history: list[dict[str, Any]] | None = None) -> str:
             return "model"
         return "factor"
     if action == "model":
-        if skip or port is None:
+        if skip or (port is None and sharpe_net is None):
             return "factor"
         try:
-            if float(port) <= 0:
+            if float(reward) <= 0:
                 return "factor"
         except (TypeError, ValueError):
             return "factor"
@@ -36,16 +44,144 @@ def choose_next_action(history: list[dict[str, Any]] | None = None) -> str:
     return "factor"
 
 
-def _equity_curve(returns: dict[str, float]) -> dict[str, float]:
-    nav = 1.0
-    curve: dict[str, float] = {}
-    for key in sorted(returns):
+def advise_action(history: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pick the next action; FINAINCE_LOOP_ADVISOR=1 asks a chat LLM first.
+
+    The heuristic answer is always computed and is the fallback whenever the
+    advisor is off, unconfigured, or fails. Never raises.
+    """
+    heuristic_action = choose_next_action(history)
+    if heuristic_action == "factor":
+        if not history:
+            heuristic_hyp = "factor step: Rank(Delta(close, 1)); chosen because first step"
+        else:
+            last = history[-1]
+            if last.get("action") == "model":
+                if last.get("skip_reason"):
+                    reason = last.get("skip_reason")
+                    heuristic_hyp = (
+                        "factor step: Rank(Delta(close, 1)); "
+                        f"chosen because previous model skipped ({reason})"
+                    )
+                else:
+                    port = (last.get("metrics") or {}).get("portfolio_return")
+                    heuristic_hyp = (
+                        "factor step: Rank(Delta(close, 1)); "
+                        f"chosen because portfolio_return {port} <= 0"
+                    )
+            else:
+                heuristic_hyp = (
+                    "factor step: Rank(Delta(close, 1)); "
+                    "chosen because previous factor failed or had no returns"
+                )
+    else:
+        heuristic_hyp = (
+            "model step: ols_linear head on lag-1/lag-2 factor returns; "
+            "chosen because previous factor succeeded with returns"
+        )
+
+    heuristic_result = {
+        "action": heuristic_action,
+        "hypothesis": heuristic_hyp,
+        "via": "heuristic",
+    }
+
+    if os.environ.get("FINAINCE_LOOP_ADVISOR") != "1":
+        return heuristic_result
+
+    try:
+        from finaince.runtime import resolve_llm
+
+        llm = resolve_llm()
+        base_url = str((llm or {}).get("base_url") or "")
+        model = str((llm or {}).get("model") or "")
+        api_key = (llm or {}).get("api_key")
+        if not api_key or not base_url or not model:
+            return {**heuristic_result, "advisor_error": "incomplete_provider"}
+
+        import httpx
+
+        prompt = "You are an advisor for a quantitative research loop. Choose the next action: 'factor' or 'model'.\n"
+        prompt += "Provide a JSON response with 'action' and 'hypothesis' keys.\n"
+        
         try:
-            nav *= 1.0 + float(returns[key])
-        except (TypeError, ValueError):
-            continue
-        curve[str(key)] = nav
-    return curve
+            from finaince import coaching
+            ctx = coaching.research_context()
+            if ctx.get("ok"):
+                samples = ctx.get("samples") or []
+                lessons = ctx.get("lessons") or []
+                if samples or lessons:
+                    prompt += "Research Context:\n"
+                    for s in samples[:3]:
+                        expr = s.get("expression", "")
+                        ic = s.get("ic", "")
+                        prompt += f"known diverse factors: {expr} (ic={ic})\n"
+                    for lesson in lessons[:3]:
+                        err = lesson.get("error_head", "")
+                        summ = lesson.get("summary_short", "")
+                        prompt += f"recent failure: {err} — {summ}\n"
+            try:
+                from finaince.process_memory import chains_display
+
+                for chain in chains_display(limit=2):
+                    prompt += (
+                        f"chain {chain['chain']}: head={chain.get('head')} tail={chain.get('tail')} "
+                        f"best_rank_ic={chain.get('best_rank_ic')}\n"
+                    )
+            except Exception:
+                pass
+            try:
+                from finaince.process_memory import context_block
+
+                block = context_block(limit=3)
+                if block:
+                    prompt += block + "\n"
+            except Exception:
+                pass
+            prompt += "\n"
+        except Exception:
+            pass
+
+        prompt += "History of last events:\n"
+        for ev in history[-10:]:
+            prompt += json.dumps({
+                "action": ev.get("action"),
+                "ok": ev.get("ok"),
+                "metrics": ev.get("metrics"),
+                "skip_reason": ev.get("skip_reason"),
+                "hypothesis": ev.get("hypothesis"),
+            }) + "\n"
+
+        resp = httpx.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+            },
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+        parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
+
+        action = parsed.get("action")
+        if action not in ("factor", "model"):
+            return {**heuristic_result, "advisor_error": f"invalid_action:{action}"}
+
+        return {
+            "action": action,
+            "hypothesis": str(parsed.get("hypothesis") or ""),
+            "via": "llm",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {**heuristic_result, "advisor_error": str(exc)}
+
+
+def _equity_curve(returns: dict[str, float]) -> dict[str, float]:
+    from finaince.domain.scoring import equity_curve
+
+    return equity_curve(returns)
 
 
 def _portfolio_return(curve: dict[str, float]) -> float | None:
@@ -59,10 +195,10 @@ def _portfolio_return(curve: dict[str, float]) -> float | None:
     return end / start - 1.0
 
 
-def run_factor_step() -> dict[str, Any]:
+def run_factor_step(expression: str = "Rank(Delta(close, 1))") -> dict[str, Any]:
     from finaince.eval.router import EvalRequest, evaluate
 
-    result = evaluate(EvalRequest(expression="Rank(Delta(close, 1))", dialect="repro_polars"))
+    result = evaluate(EvalRequest(expression=expression, dialect="repro_polars"))
     returns = {}
     if isinstance(result.metrics, dict):
         raw = result.metrics.get("daily_returns") or {}
@@ -72,20 +208,22 @@ def run_factor_step() -> dict[str, Any]:
         "action": "factor",
         "ok": bool(result.ok),
         "error": result.error,
-        "expression": "Rank(Delta(close, 1))",
+        "expression": expression,
         "metrics": {
             "ic_mean": (result.metrics or {}).get("ic_mean"),
             "sharpe_ratio": (result.metrics or {}).get("sharpe_ratio"),
         },
         "daily_returns": returns,
-        "factor_set": [{"expression": "Rank(Delta(close, 1))", "ok": result.ok}],
+        "factor_set": [{"expression": expression, "ok": result.ok}],
     }
 
 
 def run_model_step(factor_step: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Train a thin linear head on factor returns, or skip honestly."""
+    """Thin head on factor returns, plus WS-I cross-factor dynamic combination."""
+    from finaince import model_head
+
     returns = dict((factor_step or {}).get("daily_returns") or {})
-    trained = train_linear_head(returns)
+    trained = model_head.train_head(returns)
     if trained.get("skipped"):
         return {
             "action": "model",
@@ -99,14 +237,41 @@ def run_model_step(factor_step: dict[str, Any] | None = None) -> dict[str, Any]:
     port = trained.get("portfolio_return")
     if port is None:
         port = _portfolio_return(curve)
-    return {
+
+    combination_payload: dict[str, Any] | None = None
+    try:
+        from finaince import combination
+
+        combo = combination.try_combine_ready(min_factors=2)
+        if combo.get("ok"):
+            sharpe_net = combo.get("sharpe_net")
+            if isinstance(sharpe_net, (int, float)) and sharpe_net > 0:
+                port = float(sharpe_net)
+            combination_payload = {
+                "members": combo.get("members"),
+                "sharpe_net": combo.get("sharpe_net"),
+                "mean_turnover": combo.get("mean_turnover"),
+                "n_days": combo.get("n_days"),
+            }
+        else:
+            combination_payload = {"skipped": True, "reason": combo.get("reason")}
+    except Exception as exc:  # noqa: BLE001
+        combination_payload = {"skipped": True, "reason": f"combination_error:{exc}"}
+
+    metrics: dict[str, Any] = {"portfolio_return": port, "points": len(curve)}
+    if combination_payload and not combination_payload.get("skipped"):
+        metrics["sharpe_net"] = combination_payload.get("sharpe_net")
+    result = {
         "action": "model",
         "ok": port is not None,
         "skipped": False,
         "model_config": trained.get("model_config"),
         "equity_curve": curve,
-        "metrics": {"portfolio_return": port, "points": len(curve)},
+        "metrics": metrics,
     }
+    if combination_payload is not None:
+        result["combination"] = combination_payload
+    return result
 
 
 def train_linear_head(returns: dict[str, float]) -> dict[str, Any]:
@@ -145,7 +310,7 @@ def train_linear_head(returns: dict[str, float]) -> dict[str, Any]:
     }
 
 
-def run_loop(*, steps: int = 2) -> dict[str, Any]:
+def run_loop(*, steps: int = 2, expressions: list[str] | None = None) -> dict[str, Any]:
     """Two-step default: factor then model (or reverse if history already has factor)."""
     from finaince.trace import append_event, list_chain
 
@@ -156,12 +321,25 @@ def run_loop(*, steps: int = 2) -> dict[str, Any]:
     equity_curve: dict[str, float] = {}
     last_factor: dict[str, Any] | None = None
     degraded: str | None = None
+    expressions_evaluated: list[dict[str, Any]] = []
+    
+    queue = list(expressions) if expressions is not None else ["Rank(Delta(close, 1))"]
+    
     n = max(2, int(steps))
     for _ in range(n):
-        action = choose_next_action(history)
+        advice = advise_action(history)
+        action = advice["action"]
+        hypothesis = advice["hypothesis"]
+        via = advice["via"]
+
+        if action == "factor" and not queue:
+            degraded = "expression_queue_empty"
+            break
+
         chosen.append(action)
         if action == "factor":
-            step = run_factor_step()
+            expr = queue.pop(0)
+            step = run_factor_step(expr)
             last_factor = step
             factor_set = list(step.get("factor_set") or [])
             if not step.get("ok"):
@@ -169,11 +347,26 @@ def run_loop(*, steps: int = 2) -> dict[str, Any]:
             factor_metrics = dict(step.get("metrics") or {})
             if step.get("daily_returns"):
                 factor_metrics["return_points"] = len(step["daily_returns"])
+            
+            factor_metrics["expression"] = expr
+            hypothesis = f"{hypothesis} (expression: {expr})"
+            
+            expressions_evaluated.append({
+                "expression": expr,
+                "ok": step.get("ok"),
+                "ic_mean": factor_metrics.get("ic_mean"),
+            })
+
+            extra = {"action": "factor", "via": via}
+            if "advisor_error" in advice:
+                extra["advisor_error"] = advice["advisor_error"]
+
             ev = append_event(
                 "loop_factor",
                 metrics=factor_metrics,
                 error=step.get("error"),
-                extra={"action": "factor"},
+                extra=extra,
+                hypothesis=hypothesis,
             )
             history.append(
                 {
@@ -182,6 +375,7 @@ def run_loop(*, steps: int = 2) -> dict[str, Any]:
                     "ok": step.get("ok"),
                     "metrics": factor_metrics,
                     "daily_returns": step.get("daily_returns"),
+                    "hypothesis": hypothesis,
                 }
             )
         else:
@@ -190,13 +384,20 @@ def run_loop(*, steps: int = 2) -> dict[str, Any]:
             equity_curve = dict(step.get("equity_curve") or {})
             if step.get("skipped"):
                 degraded = str(step.get("reason") or "model_skipped")
+                hypothesis = f"{hypothesis} (skipped: {step.get('reason')})"
             model_metrics = dict(step.get("metrics") or {})
             if step.get("reason"):
                 model_metrics.setdefault("reason", step.get("reason"))
+
+            extra = {"action": "model", "via": via}
+            if "advisor_error" in advice:
+                extra["advisor_error"] = advice["advisor_error"]
+
             ev = append_event(
                 "loop_model",
                 metrics=model_metrics,
-                extra={"action": "model"},
+                extra=extra,
+                hypothesis=hypothesis,
             )
             history.append(
                 {
@@ -205,6 +406,7 @@ def run_loop(*, steps: int = 2) -> dict[str, Any]:
                     "ok": step.get("ok"),
                     "metrics": model_metrics,
                     "skip_reason": step.get("reason") if step.get("skipped") else None,
+                    "hypothesis": hypothesis,
                 }
             )
     has_both = "factor" in chosen and "model" in chosen
@@ -218,6 +420,7 @@ def run_loop(*, steps: int = 2) -> dict[str, Any]:
         "equity_curve": equity_curve,
         "degraded": degraded,
         "skip_reason": degraded if not equity_curve else None,
+        "expressions_evaluated": expressions_evaluated,
     }
 
 
