@@ -26,12 +26,11 @@ CREATE TABLE IF NOT EXISTS trace_events (
 
 def _connect() -> sqlite3.Connection:
     from finaince.catalog.store import FactorCatalog
+    from finaince.db import ensure_columns
 
     conn = sqlite3.connect(FactorCatalog().db_path)
     conn.executescript(_DDL)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(trace_events)")}
-    if "hypothesis" not in cols:
-        conn.execute("ALTER TABLE trace_events ADD COLUMN hypothesis TEXT")
+    ensure_columns(conn, "trace_events", [("hypothesis", "TEXT")])
     return conn
 
 

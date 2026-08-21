@@ -27,17 +27,19 @@ def _redact(detail: Any) -> Any:
 
 def _connect():
     from finaince.catalog.store import FactorCatalog
+    from finaince.db import ensure_columns
 
     cat = FactorCatalog()
     conn = sqlite3.connect(cat.db_path)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(audit_log)")}
-    for name, ddl in (
-        ("actor", "ALTER TABLE audit_log ADD COLUMN actor TEXT"),
-        ("prev_hash", "ALTER TABLE audit_log ADD COLUMN prev_hash TEXT"),
-        ("hash", "ALTER TABLE audit_log ADD COLUMN hash TEXT"),
-    ):
-        if name not in cols:
-            conn.execute(ddl)
+    ensure_columns(
+        conn,
+        "audit_log",
+        [
+            ("actor", "TEXT"),
+            ("prev_hash", "TEXT"),
+            ("hash", "TEXT"),
+        ],
+    )
     return conn
 
 

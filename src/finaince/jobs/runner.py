@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from finaince.compat import current_pgid, pid_alive, popen_detached, terminate_process_tree
+from finaince.db import ensure_columns
 
 
 def _now() -> str:
@@ -49,15 +50,15 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
-    for name, ddl in (
-        ("engine_run_id", "ALTER TABLE jobs ADD COLUMN engine_run_id TEXT"),
-        ("pid", "ALTER TABLE jobs ADD COLUMN pid INTEGER"),
-        ("pgid", "ALTER TABLE jobs ADD COLUMN pgid INTEGER"),
-    ):
-        if name not in cols:
-            conn.execute(ddl)
-            conn.commit()
+    ensure_columns(
+        conn,
+        "jobs",
+        [
+            ("engine_run_id", "TEXT"),
+            ("pid", "INTEGER"),
+            ("pgid", "INTEGER"),
+        ],
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, kind)"
     )

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from finaince.db import ensure_columns
 from finaince.domain.factor import FactorRecord
 from finaince.settings import get_settings
 
@@ -50,10 +51,7 @@ class FactorCatalog:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(_DDL)
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(factor_catalog)").fetchall()}
-            if "expr_hash" not in cols:
-                conn.execute("ALTER TABLE factor_catalog ADD COLUMN expr_hash TEXT")
-                conn.commit()
+            ensure_columns(conn, "factor_catalog", [("expr_hash", "TEXT")])
 
     def upsert(self, record: FactorRecord) -> FactorRecord:
         now = datetime.now(UTC).isoformat()
