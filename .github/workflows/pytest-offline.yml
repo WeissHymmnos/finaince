@@ -56,6 +56,7 @@ jobs:
           uv pip install -e ../finpdfpro
           .venv/bin/python -c "import finreportparser; from pathlib import Path; p=Path(finreportparser.__file__); print(finreportparser.__version__, p); assert 'finpdfpro' in str(p) or str(finreportparser.__version__).startswith('0.5')"
           .venv/bin/python -m pytest tests --ignore=tests/test_live_real.py -m "not live" -q --tb=short
+          .venv/bin/python -m pytest tests --ignore=tests/test_live_real.py -m "not live" -q --cov=finaince.expr_ast --cov=finaince.db --cov=finaince.data_track --cov=finaince.combination --cov=finaince.code_evolution --cov=finaince.corpus_campaign --cov=finaince.brain_track --cov=finaince.process_memory --cov=finaince.domain.scoring --cov-report=term
       - name: Ruff lint (non-blocking on stock warnings)
         continue-on-error: true
         run: .venv/bin/python -m ruff check src tests

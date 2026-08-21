@@ -28,6 +28,7 @@ dependencies = [
 gbm = ["lightgbm>=4.0"]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
 ]
 reproduction = [
@@ -75,3 +76,10 @@ pythonpath = ["src"]
 markers = [
     "live: real PDF / RiceQuant / chat LLM calls (network, credentials)",
 ]
+
+[tool.coverage.report]
+# Floor for the v3 governance modules (expr_ast, db, data_track, combination,
+# code_evolution, corpus_campaign, brain_track, process_memory, domain.scoring).
+# brain_track sits near 60% because live HTTP flows stay hermetic-skipped.
+fail_under = 82
+show_missing = false
