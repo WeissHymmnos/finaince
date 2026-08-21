@@ -57,6 +57,11 @@ def _connect() -> sqlite3.Connection:
     ):
         if name not in cols:
             conn.execute(ddl)
+            conn.commit()
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, kind)"
+    )
+    conn.commit()
     return conn
 
 
@@ -206,12 +211,71 @@ def submit(
     return finish_job(job_id, status=final, result=result, error=error, elapsed_ms=elapsed_ms)
 
 
+def max_concurrent_jobs() -> int:
+    raw = (os.environ.get("FINAINCE_MAX_JOBS") or "2").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 2
+    return max(1, value)
+
+
+def active_jobs(kind: str | None = None) -> list[dict[str, Any]]:
+    """Running/queued rows (SQL-filtered, status index) with dead-child reaping."""
+    sql = (
+        "SELECT id, kind, status, error, engine_run_id, pid, created_at FROM jobs "
+        "WHERE status IN ('running','queued')"
+    )
+    params: list[Any] = []
+    if kind:
+        sql += " AND kind=?"
+        params.append(kind)
+    sql += " ORDER BY created_at DESC"
+    with _connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        live = get_job(row[0], reap=True)
+        if live and live.get("status") in {"running", "queued"}:
+            out.append(live)
+    return out
+
+
+def can_submit(kind: str, *, payload_key: str | None = None) -> dict[str, Any]:
+    """WS-C pending-aware guard: reject a second async job for the same work item."""
+    for job in active_jobs(kind):
+        if payload_key is not None:
+            stored_payload = job.get("payload")
+            stored = stored_payload.get("dedup_key") if isinstance(stored_payload, dict) else None
+            if stored != payload_key:
+                continue
+        return {
+            "ok": False,
+            "error": "duplicate_pending",
+            "running_job_id": job["id"],
+            "running_status": job.get("status"),
+        }
+    return {"ok": True}
+
+
 def start_process(kind: str, payload: dict[str, Any], argv: list[str]) -> dict[str, Any]:
     """Spawn a detached child that must finish *this* job id.
 
     The child inherits ``FINAINCE_JOB_ID``. ``submit()`` / ``--sync`` then
     write done/error onto the same row so ``GET /jobs/{id}`` can stop.
+    WS-C: duplicate-payload rejection + FINAINCE_MAX_JOBS concurrency cap.
     """
+    guard = can_submit(kind, payload_key=payload.get("dedup_key") if isinstance(payload, dict) else None)
+    if not guard.get("ok"):
+        return guard
+    running = active_jobs()
+    if len(running) >= max_concurrent_jobs():
+        return {
+            "ok": False,
+            "error": "max_jobs_reached",
+            "limit": max_concurrent_jobs(),
+            "running_job_ids": [job["id"] for job in running],
+        }
     job_id = uuid.uuid4().hex
     now = _now()
     with _connect() as conn:
@@ -312,7 +376,7 @@ def run_reproduce_job(
 
     from finaince.reproduction import reproduce_report
 
-    payload = {"pdf_path": str(pdf_path), "backtest_kwargs": backtest_kwargs or {}}
+    payload = {"pdf_path": str(pdf_path), "backtest_kwargs": backtest_kwargs or {}, "dedup_key": f"pdf:{os.path.realpath(str(pdf_path))}"}
     extra: list[str] = []
     kwargs = dict(backtest_kwargs or {})
     if kwargs.get("start_date"):
@@ -388,10 +452,27 @@ def run_impl_job(
     return submit("isolated_impl", payload, run=_run)
 
 
-def run_loop_job(*, steps: int = 2, sync: bool = True) -> dict[str, Any]:
+def _loop_dedup_key() -> str:
+    try:
+        from finaince.eval.router import _local_panel_identity
+
+        return "loop:" + repr(_local_panel_identity())
+    except Exception:
+        return "loop:unknown"
+
+
+def run_loop_job(*, steps: int = 2, sync: bool = True, expressions: list[str] | None = None) -> dict[str, Any]:
     from finaince.loop import run_loop
 
-    payload = {"steps": int(steps)}
+    payload = {"steps": int(steps), "expressions": expressions, "dedup_key": _loop_dedup_key()}
     if not sync:
-        return submit("research_loop", payload)
-    return submit("research_loop", payload, run=lambda: run_loop(steps=steps))
+        argv = [sys.executable, "-m", "finaince", "loop", "--steps", str(steps), "--sync"]
+        if expressions:
+            for expr in expressions:
+                argv.extend(["--expression", expr])
+        return start_process(
+            "research_loop",
+            payload,
+            argv,
+        )
+    return submit("research_loop", payload, run=lambda: run_loop(steps=steps, expressions=expressions))

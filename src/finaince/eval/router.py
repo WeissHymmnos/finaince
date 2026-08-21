@@ -14,7 +14,7 @@ class EvalRequest:
     universe: str = "local_panel"
     start: str | None = None
     end: str | None = None
-    cost_bps: float | None = None
+    cost_bps: float = 0.0
 
 
 @dataclass
@@ -31,6 +31,78 @@ class EvalResult:
 
 _OPERATORS: set[str] | None = None
 _OPERATORS_MTIME: int | None = None
+
+_PANEL_CACHE: dict[tuple, Any] = {}
+_PANEL_CACHE_STATS: dict[str, int] = {"hits": 0, "misses": 0}
+_PANEL_CACHE_INSTALLED = False
+
+
+def _panel_cache_disabled() -> bool:
+    import os
+
+    return os.environ.get("FINAINCE_PANEL_CACHE", "").strip().lower() in {"off", "0", "false"}
+
+
+def _local_panel_identity() -> tuple:
+    from pathlib import Path
+
+    from finaince.runtime import raw_local_data_root
+
+    root = raw_local_data_root()
+    signature = ("", -1, -1)
+    if root:
+        probe = Path(root)
+        if probe.is_dir():
+            probe = probe / "prices.parquet"
+        try:
+            st = probe.stat()
+            signature = (str(probe), st.st_mtime_ns, st.st_size)
+        except OSError:
+            signature = (str(probe), -1, -1)
+    return signature
+
+
+def _install_panel_cache() -> bool:
+    """Wrap DataLoader.load_price_data with a process-level local-panel cache (WS-C).
+
+    reproagent's build_backtest_bundle reloads the parquet on every eval; within
+    one batch loop the panel is identical, so we memoize the local branch only.
+    Ricequant/qlib/tushare sources stay uncached (live fetches may vary).
+    """
+    global _PANEL_CACHE_INSTALLED
+    if _PANEL_CACHE_INSTALLED:
+        return True
+    try:
+        from reproagent.reproducer.data_loader import DataLoader
+    except Exception:
+        return False
+
+    original = DataLoader.load_price_data
+
+    def cached_load(self, universe, start, end):
+        if _panel_cache_disabled() or self.settings.data_source != "local":
+            return original(self, universe, start, end)
+        key = (
+            self.settings.data_source,
+            str(universe),
+            getattr(start, "isoformat", lambda: str(start))(),
+            getattr(end, "isoformat", lambda: str(end))(),
+            _local_panel_identity(),
+        )
+        hit = _PANEL_CACHE.get(key)
+        if hit is not None:
+            _PANEL_CACHE_STATS["hits"] += 1
+            return hit.clone()
+        _PANEL_CACHE_STATS["misses"] += 1
+        frame = original(self, universe, start, end)
+        if len(_PANEL_CACHE) >= 8:
+            _PANEL_CACHE.clear()
+        _PANEL_CACHE[key] = frame.clone()
+        return frame
+
+    DataLoader.load_price_data = cached_load
+    _PANEL_CACHE_INSTALLED = True
+    return True
 
 
 def listed_operators() -> set[str]:
@@ -107,10 +179,13 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             )
         import os
 
+        from reproagent.reproducer.backtest_bundle import build_backtest_bundle
+
         from finaince.domain.factor import finite_ic
         from finaince.runtime import default_backtest_window, packaged_local_panel
         from finaince.settings import reproagent_runtime_settings
-        from reproagent.reproducer.backtest_bundle import build_backtest_bundle
+
+        _install_panel_cache()
 
         if req.start and req.end and req.start > req.end:
             emit("eval_finished", dialect=req.dialect, data_backend=req.data_backend, ok=False)
@@ -165,9 +240,8 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             "end_date": end,
             "universe": universe,
             "settings": settings,
+            "transaction_cost_bps": 0.0,
         }
-        if cost_bps is not None:
-            bundle_kwargs["transaction_cost_bps"] = float(cost_bps)
         try:
             bt = build_backtest_bundle(req.expression, **bundle_kwargs)
         except Exception as exc:  # noqa: BLE001
@@ -185,16 +259,58 @@ def _evaluate(req: EvalRequest) -> EvalResult:
         ic = finite_ic(bt.get("ic_mean"))
         ok = ic is not None and int(rows) > 0
         daily_returns: dict[str, float] = {}
+        turnover_series: dict[str, float] = {}
         equity_path = bt.get("equity_curve_path")
         if equity_path:
             try:
-                from pathlib import Path as EquityPath
+                import polars as pl
 
-                from reproagent.reproducer.metrics import serialize_equity_returns
-
-                daily_returns = serialize_equity_returns(EquityPath(str(equity_path)))
+                df = pl.read_parquet(str(equity_path))
+                if "date" in df.columns and "ls_return_raw" in df.columns:
+                    for d, r in zip(df["date"].to_list(), df["ls_return_raw"].to_list()):
+                        if r is not None:
+                            key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+                            daily_returns[key] = float(r)
+                if "date" in df.columns and "turnover" in df.columns:
+                    for d, t in zip(df["date"].to_list(), df["turnover"].to_list()):
+                        if t is not None:
+                            key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+                            turnover_series[key] = float(t)
             except Exception:
                 daily_returns = {}
+                turnover_series = {}
+
+        sharpe_ratio = bt.get("sharpe_ratio")
+        max_drawdown = bt.get("max_drawdown")
+        long_short_annual_return = bt.get("long_short_annual_return")
+        turnover_mean = None
+        sharpe_net = None
+
+        if cost_bps > 0:
+            if not turnover_series:
+                warnings.append("cost_not_applied_no_turnover")
+            else:
+                import polars as pl
+                from reproagent.reproducer.metrics import compute_max_drawdown, compute_sharpe
+                
+                dates = sorted(daily_returns.keys())
+                net_returns = []
+                for d in dates:
+                    raw = daily_returns[d]
+                    t = turnover_series.get(d, 0.0)
+                    net = raw - (cost_bps / 10000.0) * t
+                    net_returns.append(net)
+                    daily_returns[d] = net
+                
+                if net_returns:
+                    net_series = pl.Series("net_return", net_returns)
+                    sharpe_net = compute_sharpe(net_series)
+                    equity_curve = (1 + net_series).cum_prod()
+                    max_drawdown = compute_max_drawdown(equity_curve)
+                    long_short_annual_return = float(net_series.mean() or 0.0) * 252
+                    sharpe_ratio = sharpe_net
+                    turnover_mean = sum(turnover_series.values()) / len(turnover_series)
+
         try:
             from finaince.catalog.audit import append as audit_append
 
@@ -208,27 +324,36 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             ok=ok,
             thin_panel="thin_panel" in warnings,
         )
+        
+        metrics_dict = {
+            "validation": payload,
+            "ic_mean": ic,
+            "ic_ir": bt.get("ic_ir"),
+            "sharpe_ratio": sharpe_ratio,
+            "max_drawdown": max_drawdown,
+            "long_short_annual_return": long_short_annual_return,
+            "backtest_id": bt.get("backtest_id"),
+            "rows": rows,
+            "start": start,
+            "end": end,
+            "data_source": settings.data_source,
+            "universe_claim": universe,
+            "alt_text": alt_text,
+            "daily_returns": daily_returns,
+            "transaction_cost_bps": cost_bps,
+        }
+        if cost_bps > 0:
+            metrics_dict["cost_bps"] = cost_bps
+            if turnover_mean is not None:
+                metrics_dict["turnover_mean"] = turnover_mean
+            if sharpe_net is not None:
+                metrics_dict["sharpe_net"] = sharpe_net
+
         return EvalResult(
             ok=ok,
             dialect=req.dialect,
             data_backend=backend or settings.data_source,
-            metrics={
-                "validation": payload,
-                "ic_mean": ic,
-                "ic_ir": bt.get("ic_ir"),
-                "sharpe_ratio": bt.get("sharpe_ratio"),
-                "max_drawdown": bt.get("max_drawdown"),
-                "long_short_annual_return": bt.get("long_short_annual_return"),
-                "backtest_id": bt.get("backtest_id"),
-                "rows": rows,
-                "start": start,
-                "end": end,
-                "data_source": settings.data_source,
-                "universe_claim": universe,
-                "alt_text": alt_text,
-                "daily_returns": daily_returns,
-                "transaction_cost_bps": bt.get("transaction_cost_bps"),
-            },
+            metrics=metrics_dict,
             translatable=translatable,
             alt_text=alt_text,
             warnings=warnings,
