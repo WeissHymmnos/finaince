@@ -11,7 +11,6 @@ from typing import Any
 from finaince.domain.factor import FactorRecord
 from finaince.settings import get_settings
 
-
 _DDL = """
 CREATE TABLE IF NOT EXISTS factor_catalog (
     id TEXT PRIMARY KEY,
@@ -51,11 +50,16 @@ class FactorCatalog:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(_DDL)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(factor_catalog)").fetchall()}
+            if "expr_hash" not in cols:
+                conn.execute("ALTER TABLE factor_catalog ADD COLUMN expr_hash TEXT")
+                conn.commit()
 
     def upsert(self, record: FactorRecord) -> FactorRecord:
         now = datetime.now(UTC).isoformat()
         record.updated_at = datetime.now(UTC)
         payload = record.model_dump(mode="json")
+        expr_hash = self._hash_expression(record)
         with sqlite3.connect(self.db_path) as conn:
             existing = conn.execute(
                 "SELECT id, record_json FROM factor_catalog WHERE source=? AND source_ref=?",
@@ -69,8 +73,8 @@ class FactorCatalog:
             conn.execute(
                 """
                 INSERT INTO factor_catalog
-                    (id, source, source_ref, name, name_cn, status, dialect, formula, record_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, source, source_ref, name, name_cn, status, dialect, formula, record_json, created_at, updated_at, expr_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, source_ref) DO UPDATE SET
                     name=excluded.name,
                     name_cn=excluded.name_cn,
@@ -78,7 +82,8 @@ class FactorCatalog:
                     dialect=excluded.dialect,
                     formula=excluded.formula,
                     record_json=excluded.record_json,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    expr_hash=excluded.expr_hash
                 """,
                 (
                     record.id,
@@ -92,6 +97,7 @@ class FactorCatalog:
                     json.dumps(payload, default=str),
                     payload.get("created_at", now),
                     now,
+                    expr_hash,
                 ),
             )
             conn.commit()
@@ -102,6 +108,33 @@ class FactorCatalog:
         except Exception:
             pass
         return record
+
+    @staticmethod
+    def _hash_expression(record: FactorRecord) -> str:
+        try:
+            from finaince.expr_ast import expr_hash
+
+            return expr_hash(record.expression.text, record.expression.dialect)
+        except Exception:
+            return ""
+
+    def find_by_expr_hash(self, expression: str, dialect: str) -> list[dict[str, Any]]:
+        """O(1)-indexed lookup of rows sharing the coarse-normalized tree hash."""
+        try:
+            from finaince.expr_ast import expr_hash
+
+            digest = expr_hash(expression, dialect)
+        except Exception:
+            return []
+        if not digest:
+            return []
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_factor_catalog_expr_hash ON factor_catalog(expr_hash)")
+            rows = conn.execute(
+                "SELECT id, source, status, formula FROM factor_catalog WHERE expr_hash=?",
+                (digest,),
+            ).fetchall()
+        return [{"id": r[0], "source": r[1], "status": r[2], "formula": r[3]} for r in rows]
 
     def get(self, catalog_id: str) -> FactorRecord | None:
         with sqlite3.connect(self.db_path) as conn:
