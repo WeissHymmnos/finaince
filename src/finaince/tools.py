@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from finaince.discovery import cull_factor_pool, score_factor
@@ -164,3 +163,28 @@ def handle_discover_swarm(args: list[str] | None = None, *, sync: bool = True) -
     from finaince.jobs.runner import run_swarm_job
 
     return run_swarm_job(list(args or []), sync=sync)
+
+
+def handle_recent_failures(error: str | None = None, limit: int = 5) -> dict[str, Any]:
+    from finaince.trace import recent_failures
+
+    try:
+        limit = max(1, min(50, int(limit)))
+        if error == "":
+            error = None
+        items = recent_failures(error=error, limit=limit)
+        return {"ok": True, "items": items, "count": len(items)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+
+def handle_research_context(error_prefix: str | None = None, sample_limit: int = 5, lesson_limit: int = 5) -> dict[str, Any]:
+    from finaince.coaching import research_context
+    
+    try:
+        sample_limit = max(1, min(20, int(sample_limit)))
+        lesson_limit = max(1, min(20, int(lesson_limit)))
+        if error_prefix == "":
+            error_prefix = None
+        return research_context(error_prefix=error_prefix, sample_limit=sample_limit, lesson_limit=lesson_limit)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}

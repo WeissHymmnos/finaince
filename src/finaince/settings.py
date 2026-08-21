@@ -129,7 +129,8 @@ def sibling_fixture_data() -> Path | None:
 
 def reproagent_runtime_settings():
     """Settings the CLI/jobs pass to the shipped reproduce_report."""
-    from reproagent.settings import Settings, get_settings as repro_get
+    from reproagent.settings import Settings
+    from reproagent.settings import get_settings as repro_get
 
     cfg = get_settings()
     cfg.apply_engine_env()
@@ -298,6 +299,16 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         memory_ok = True
     except Exception:
         memory_ok = False
+        
+    from finaince.runtime import panel_path, panel_stats
+    try:
+        resolved_panel_path = str(panel_path())
+    except ValueError:
+        resolved_panel_path = None
+        
+    panel_stats_dict = panel_stats()
+    universe_claim_warning = "thin" if panel_stats_dict.get("thin") else None
+    
     panel = local_panel_stats()
     orphan = Path.cwd() / "results" / "alpha_miner.db"
     audit = None
@@ -307,7 +318,7 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         audit = verify_tail()
     from finaince.eval.qlib_subprocess import qlib_subprocess_enabled
     from finaince.isolate import isolator_available
-    from finaince.runtime import aiminer_python, packaged_local_panel, qlib_local_data_path
+    from finaince.runtime import packaged_local_panel, qlib_local_data_path
 
     isolator = isolator_available()
     qlib_py = (aiminer_python() or os.environ.get("AIMINER_PYTHON") or "").strip()
@@ -336,6 +347,18 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
     if not isolator.get("ok"):
         ok = False
         issues.append(f"isolator unavailable: {isolator.get('error')}")
+    try:
+        from finaince.data_track import doctor_section as data_track_doctor
+
+        data_track = data_track_doctor()
+    except Exception as exc:  # noqa: BLE001
+        data_track = {"error": str(exc)}
+    try:
+        from finaince.isolate import sandbox_backend
+
+        sandbox = sandbox_backend()
+    except Exception as exc:  # noqa: BLE001
+        sandbox = {"error": str(exc)}
     return {
         "product_name": cfg.product_name,
         "ok": ok,
@@ -373,11 +396,16 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         "websockets": ws_lib,
         "memory_tables": memory_ok,
         "panel": panel,
+        "panel_path": resolved_panel_path,
+        "panel_stats": panel_stats_dict,
+        "universe_claim_warning": universe_claim_warning,
         "extract_model": llm["model"],
         "orphan_results": orphan.is_file(),
         "audit": audit,
         "isolator": isolator,
         "qlib_child": qlib_child,
+        "data_track": data_track,
+        "sandbox_backend": sandbox,
     }
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -11,9 +10,7 @@ import pytest
 from finaince.runtime import (
     DEFAULT_LOCAL_DATA,
     DEFAULT_PDF_ROOT,
-    cpa_reachable,
     has_rq_credentials,
-    official_deepseek_key,
     resolve_llm,
 )
 

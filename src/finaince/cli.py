@@ -492,12 +492,101 @@ def baseline_cmd() -> None:
     typer.echo(json.dumps(run_locked_baseline(), default=str, ensure_ascii=False, indent=2))
 
 
+@app.command("bench")
+def bench_cmd(
+    is_start: str = typer.Option("2019-01-01", "--is-start", help="In-sample window start"),
+    is_end: str = typer.Option("2023-12-31", "--is-end"),
+    oos_start: str = typer.Option("2024-01-01", "--oos-start"),
+    oos_end: str = typer.Option("2024-12-31", "--oos-end"),
+    cost_bps: float = typer.Option(5.0, "--cost-bps", help="Double-sided cost applied to quintile LS turnover"),
+    sync: bool = typer.Option(
+        False,
+        "--sync",
+        help="Live-fetch missing cache years + constituent snapshots via RQ (requires RQ_USER/RQ_PASS)",
+    ),
+    start_year: int = typer.Option(2019, "--start-year", help="--sync: first price year to fetch"),
+    end_year: int = typer.Option(2024, "--end-year", help="--sync: last price year to fetch"),
+) -> None:
+    """WS-D citable CSI300 double-window benchmark over the point-in-time cache."""
+    from finaince.data_track import run_bench, sync_cache
+
+    if sync:
+        outcome = sync_cache(start_year, end_year)
+        if not outcome.get("ok"):
+            typer.echo(json.dumps(outcome, ensure_ascii=False, indent=2), err=True)
+            raise typer.Exit(code=1)
+    result = run_bench(
+        is_start=is_start,
+        is_end=is_end,
+        oos_start=oos_start,
+        oos_end=oos_end,
+        cost_bps=cost_bps,
+    )
+    typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
+    if not result.get("ok"):
+        raise typer.Exit(code=1)
+
+
+@app.command("brain-submit")
+def brain_submit_cmd(
+    expression: str = typer.Argument(..., help="FASTEXPR expression to adjudicate"),
+    catalog_id: Optional[str] = typer.Option(None, "--catalog-id", help="Write the ruling back onto this record"),
+    region: str = typer.Option("CHN", "--region"),
+    universe: str = typer.Option("TOP2000U", "--universe"),
+) -> None:
+    """WS-J external BRAIN ruling; degrades to the internal dual-window bench honestly."""
+    from finaince.brain_track import adjudicate
+
+    result = adjudicate(
+        expression,
+        catalog_id=catalog_id,
+        settings={"region": region, "universe": universe},
+    )
+    typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
+    if not result.get("ok") and result.get("adjudication_level") == "none":
+        raise typer.Exit(code=1)
+
+
+@app.command("campaign")
+def campaign_cmd(
+    root: Path = typer.Option(..., "--root", exists=True, file_okay=False, help="Directory of broker-report PDFs"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Max reports to process this run"),
+    stats_only: bool = typer.Option(False, "--stats", help="Print manifest statistics and exit"),
+    reset_failed: bool = typer.Option(False, "--reset-failed", help="Requeue failed entries before running"),
+) -> None:
+    """WS-K corpus campaign: batch governed reproduction with resume."""
+    from finaince import corpus_campaign
+
+    if reset_failed:
+        moved = corpus_campaign.reset_failed(root)
+        typer.echo(json.dumps({"reset_failed": moved}, ensure_ascii=False))
+    if stats_only:
+        typer.echo(json.dumps(corpus_campaign.stats_summary(), ensure_ascii=False, indent=2))
+        return
+    outcome = corpus_campaign.run_campaign(root, limit=limit)
+    typer.echo(json.dumps(outcome, default=str, ensure_ascii=False, indent=2))
+    if not outcome.get("ok"):
+        raise typer.Exit(code=1)
+
+
 @app.command("loop")
-def loop_cmd(steps: int = typer.Option(2, "--steps")) -> None:
+def loop_cmd(
+    steps: int = typer.Option(2, "--steps"),
+    sync: bool = typer.Option(
+        True,
+        "--sync/--async",
+        help="Record a platform job; --sync (default) runs the pipeline in-process",
+    ),
+    expression: list[str] = typer.Option(
+        None,
+        "--expression",
+        help="Expressions to evaluate in factor steps (queue)",
+    ),
+) -> None:
     """Alternate a factor step and a model step toward a portfolio metric."""
     from finaince.jobs.runner import run_loop_job
 
-    out = run_loop_job(steps=steps)
+    out = run_loop_job(steps=steps, sync=sync, expressions=expression)
     typer.echo(json.dumps(out, default=str, ensure_ascii=False))
 
 

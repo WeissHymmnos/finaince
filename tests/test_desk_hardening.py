@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from finaince.serve import create_app
-from tests.conftest import DESK_TOKEN, desk_headers, MINIMAL_PDF
+from tests.conftest import DESK_TOKEN, desk_headers
 
 ROOT = Path(__file__).resolve().parents[1]
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -68,10 +68,11 @@ def test_mutation_http_requires_desk_token_and_pdf_root(isolated_home: Path, tmp
 
 
 def test_http_approve_rejects_client_override(isolated_home: Path) -> None:
+    from aiminer.pool_io import load_alpha_pool_rows
+
     from finaince.catalog.hooks import accept_library_entry
     from finaince.catalog.store import FactorCatalog
     from finaince.review.desk import promote
-    from aiminer.pool_io import load_alpha_pool_rows
     from finaince.settings import get_settings
 
     returns = {f"2024-04-{d:02d}": 0.01 for d in range(1, 13)}
@@ -159,6 +160,7 @@ def test_smoke_panel_fail_closes_thin_and_does_not_write_pool(isolated_home: Pat
     from datetime import UTC, datetime
 
     from aiminer.pool_io import load_alpha_pool_rows
+
     from finaince.catalog.store import FactorCatalog
     from finaince.domain.factor import FactorExpression, FactorLineage, FactorMetrics, FactorRecord
     from finaince.review.desk import approve, promote

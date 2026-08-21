@@ -6,8 +6,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
-
 FRONTEND = Path(__file__).resolve().parents[2] / "aiminer" / "frontend"
 
 
@@ -87,9 +85,9 @@ def test_frontend_routes_controls_and_non_ai_stylesheet() -> None:
 def test_workbench_aiminer_routes_do_not_404(isolated_home: Path) -> None:
     from fastapi.testclient import TestClient
 
+    import finaince.serve as serve_mod
     from finaince.catalog.hooks import accept_pool_row
     from finaince.serve import create_app
-    import finaince.serve as serve_mod
     from tests.conftest import DESK_TOKEN, desk_headers
 
     accept_pool_row(
@@ -154,12 +152,11 @@ def test_workbench_aiminer_routes_do_not_404(isolated_home: Path) -> None:
 
 
 def test_workbench_mutations_round_trip(isolated_home: Path) -> None:
-    import os
 
     from fastapi.testclient import TestClient
 
-    from finaince.serve import create_app
     import finaince.serve as serve_mod
+    from finaince.serve import create_app
     from tests.conftest import desk_headers
 
     vault = isolated_home / "aiminer" / "data" / "wiki_vault"

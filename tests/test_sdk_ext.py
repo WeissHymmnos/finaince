@@ -112,8 +112,9 @@ def test_search_library_handler_returns_search_payload(tmp_path: Path) -> None:
 
 
 def test_desk_handlers_call_shipped_catalog_and_eval(monkeypatch) -> None:
-    from finaince.tools import handle_catalog_list, handle_doctor, handle_eval_expression
     from reproagent.settings import get_settings
+
+    from finaince.tools import handle_catalog_list, handle_doctor, handle_eval_expression
 
     doc = handle_doctor()
     assert doc["product_name"] == "FinAlpha"

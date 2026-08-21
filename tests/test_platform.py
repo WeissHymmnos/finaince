@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from finaince.cli import app
-from finaince.domain.adapters import from_aiminer_dict, from_library_entry
 from finaince.domain.scoring import named_score
 from finaince.review.desk import approve, promote
-from finaince.review.gates import evaluate_gates
 from finaince.tools import handle_score_factor
-
 
 runner = CliRunner()
 
@@ -149,6 +145,7 @@ def test_promote_pending_approve_fail_closed(isolated_home: Path) -> None:
 
 def test_approve_reproduction_to_pool_writes_nonempty_code(isolated_home: Path) -> None:
     from aiminer.pool_io import load_alpha_pool_rows
+
     from finaince.catalog.hooks import accept_library_entry
     from finaince.catalog.store import FactorCatalog
     from finaince.settings import get_settings
@@ -189,7 +186,7 @@ def test_approve_reproduction_to_pool_writes_nonempty_code(isolated_home: Path) 
     submitted = promote(rec.id, direction="to_pool")
     assert submitted["ok"] is True
     assert submitted["status"] == "review"
-    result = approve(submitted["promotion_id"], override=["thin_panel"])
+    result = approve(submitted["promotion_id"], override=["thin_panel", "homogeneous"])
     assert result["ok"] is True, result
     assert result["status"] == "ready"
 
@@ -264,7 +261,6 @@ def test_pandas_to_polars_coerces_nullable_int() -> None:
     """Shipped ricequant helper must accept pandas Int64 without hanging on pyarrow."""
     import pandas as pd
     import polars as pl
-
     from reproagent.reproducer.data_loader import _pandas_to_polars
 
     frame = pd.DataFrame(
@@ -283,10 +279,10 @@ def test_pandas_to_polars_coerces_nullable_int() -> None:
 
 
 def test_eval_router_repro_polars(monkeypatch: pytest.MonkeyPatch) -> None:
-    import os
+
+    from reproagent.settings import get_settings
 
     from finaince.eval.router import EvalRequest, evaluate
-    from reproagent.settings import get_settings
 
     fixture = Path(__file__).resolve().parents[2] / "reproagent" / "tests" / "fixtures" / "test_data"
     monkeypatch.setenv("LOCAL_DATA_PATH", str(fixture))
@@ -493,6 +489,7 @@ def test_rustminer_rebuild_is_select_only(isolated_home: Path, tmp_path: Path) -
     import sqlite3
 
     from aiminer.pool_io import persist_alpha_pool_rows
+
     from finaince.catalog.rebuild import rebuild
     from finaince.catalog.store import FactorCatalog
 
@@ -554,7 +551,6 @@ def test_job_submit_list_and_cancel(isolated_home: Path) -> None:
 def test_eval_cli_returns_numeric_metrics(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import os
 
     from reproagent.settings import get_settings
 

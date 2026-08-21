@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+
 def documents_root() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:

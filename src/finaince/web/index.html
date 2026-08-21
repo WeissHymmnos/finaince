@@ -2,10 +2,163 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>FinAlpha</title>
+    <title>FinAlpha desk</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { color-scheme: light dark; }
+      body { font: 14px/1.45 system-ui, sans-serif; margin: 0; }
+      header { padding: 10px 16px; border-bottom: 1px solid #8884; display: flex; gap: 12px; align-items: center; }
+      header input { flex: 1; max-width: 320px; padding: 4px 8px; }
+      main { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; min-height: calc(100vh - 49px); }
+      section { border-right: 1px solid #8884; padding: 12px; overflow-y: auto; max-height: calc(100vh - 49px); }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; margin: 4px 0 10px; }
+      .card, .item { border: 1px solid #8886; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+      .tag { display: inline-block; border-radius: 999px; padding: 0 8px; margin-right: 4px; font-size: 11px; border: 1px solid #8886; }
+      .tag.bad { border-color: #c0392b; color: #c0392b; }
+      .tag.good { border-color: #1e8449; color: #1e8449; }
+      button { padding: 3px 10px; margin-right: 6px; }
+      pre { white-space: pre-wrap; font-size: 12px; }
+      .muted { opacity: .65; }
+    </style>
   </head>
   <body>
-    <div id="root">FinAlpha desk</div>
+    <header>
+      <strong>FinAlpha</strong>
+      <input id="token" type="password" placeholder="desk token" />
+      <button id="reload">reload</button>
+      <span id="status" class="muted"></span>
+    </header>
+    <main>
+      <section id="pane-catalog">
+        <h2>Catalog</h2>
+        <div id="catalog-list" class="muted">loading…</div>
+      </section>
+      <section id="pane-review">
+        <h2>Review queue</h2>
+        <div id="review-list" class="muted">loading…</div>
+        <div id="gates-report"></div>
+      </section>
+      <section id="pane-trace">
+        <h2>Trace chain</h2>
+        <div id="trace-list" class="muted">loading…</div>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const headers = () => {
+        const token = $("token").value.trim();
+        return token ? { "X-API-Key": token } : {};
+      };
+      async function get(path) {
+        const res = await fetch(path, { headers: headers() });
+        if (!res.ok) throw new Error(`${path}: ${res.status}`);
+        return res.json();
+      }
+      async function post(path, body) {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers() },
+          body: JSON.stringify(body || {}),
+        });
+        return { ok: res.ok, data: await res.json().catch(() => ({})) };
+      }
+      function tag(text, cls = "") { return `<span class="tag ${cls}">${text}</span>`; }
+
+      async function loadCatalog() {
+        const box = $("catalog-list");
+        box.textContent = "loading…";
+        try {
+          const data = await get("/api/v1/catalog");
+          box.textContent = "";
+          for (const item of data.items || []) {
+            const tags = [
+              item.status,
+              `cost=${item.cost_bps ?? "-"}`,
+              `sharpe_net=${(item.metrics && item.metrics.sharpe_net) ?? "-"}`,
+            ].map((t) => tag(t));
+            const card = document.createElement("div");
+            card.className = "card";
+            card.innerHTML = `<b>${item.name || item.id}</b><br/>${tags.join(" ")}<pre class="muted">${(item.formula || "").replace(/</g, "&lt;")}</pre>`;
+            card.onclick = () => showGates(item.id);
+            box.append(card);
+          }
+        } catch (err) { box.textContent = String(err); }
+      }
+
+      async function loadReview() {
+        const box = $("review-list");
+        box.textContent = "loading…";
+        try {
+          const data = await get("/api/v1/review");
+          box.textContent = "";
+          for (const promo of data.items || []) {
+            const row = document.createElement("div");
+            row.className = "item";
+            row.innerHTML = `${promo.catalog_id}<br/><span class="muted">${promo.direction} · ${(promo.created_at || "").slice(0, 19)}</span><br/>
+              <button data-act="gates">gates</button>
+              <button data-act="adversary">adversary</button>
+              <button data-act="approve">approve</button>
+              <button data-act="reject">reject</button>`;
+            row.querySelector('[data-act="gates"]').onclick = () => showGates(promo.catalog_id, promo.id);
+            row.querySelector('[data-act="adversary"]').onclick = async () => {
+              $("status").textContent = "adversary running…";
+              const out = await post(`/api/v1/review/${promo.id}/adversary`);
+              $("status").textContent = `adversary ${out.ok ? "ok" : "failed"}`;
+              showGates(promo.catalog_id, promo.id);
+            };
+            row.querySelector('[data-act="approve"]').onclick = async () => {
+              const out = await post(`/api/v1/review/${promo.id}/approve`);
+              $("status").textContent = out.ok ? "approved" : `blocked: ${(out.data.gates?.failures || []).join(",")}`;
+              loadReview();
+            };
+            row.querySelector('[data-act="reject"]').onclick = async () => {
+              await post(`/api/v1/review/${promo.id}/reject`);
+              loadReview();
+            };
+            box.append(row);
+          }
+        } catch (err) { box.textContent = String(err); }
+      }
+
+      async function showGates(catalogId, promotionId) {
+        const report = $("gates-report");
+        report.textContent = "…";
+        try {
+          let url;
+          if (promotionId) url = `/api/v1/review/${promotionId}/gates`;
+          else {
+            const promos = (await get("/api/v1/review")).items || [];
+            const match = promos.find((p) => p.catalog_id === catalogId);
+            if (!match) { report.textContent = "no pending promotion for this record"; return; }
+            url = `/api/v1/review/${match.id}/gates`;
+          }
+          const gates = await get(url);
+          const failures = (gates.failures || []).map((f) => tag(f, "bad")).join(" ") || tag("passed", "good");
+          report.innerHTML = `<div class="card"><b>${gates.promotion_id}</b> ${failures}
+            <pre>${JSON.stringify(gates.details, null, 1).replace(/</g, "&lt;")}</pre></div>`;
+        } catch (err) { report.textContent = String(err); }
+      }
+
+      async function loadTrace() {
+        const box = $("trace-list");
+        box.textContent = "loading…";
+        try {
+          const data = await get("/api/v1/trace?limit=30");
+          box.textContent = "";
+          for (const ev of data.items || []) {
+            const item = document.createElement("div");
+            item.className = "item";
+            item.innerHTML = `<b>${ev.action}</b> ${ev.ok === false ? tag("fail", "bad") : ""}
+              <span class="muted">${ev.ts || ""}</span><br/>
+              <span class="muted">${String(ev.hypothesis || ev.summary || "").slice(0, 140).replace(/</g, "&lt;")}</span>`;
+            box.append(item);
+          }
+        } catch (err) { box.textContent = String(err); }
+      }
+
+      function reloadAll() { loadCatalog(); loadReview(); loadTrace(); $("gates-report").textContent = ""; }
+      $("reload").onclick = reloadAll;
+      reloadAll();
+    </script>
   </body>
 </html>

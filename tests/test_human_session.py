@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from finaince.catalog.hooks import accept_library_entry
 from finaince.catalog.store import FactorCatalog
 from finaince.serve import create_app
-from tests.conftest import AIMINER_FRONTEND, MINIMAL_PDF, desk_headers
+from tests.conftest import AIMINER_FRONTEND, desk_headers
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -112,8 +112,9 @@ def test_human_workbench_reads_are_html_and_json(isolated_home: Path) -> None:
 
 def test_human_mutation_loop_on_served_app(isolated_home: Path, sample_report_path: Path) -> None:
     from aiminer.pool_io import load_alpha_pool_rows
-    from finaince.settings import get_settings
+
     import finaince.serve as serve_mod
+    from finaince.settings import get_settings
 
     class _F:
         name = "human_mom"

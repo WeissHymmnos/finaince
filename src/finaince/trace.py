@@ -8,7 +8,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-
 _DDL = """
 CREATE TABLE IF NOT EXISTS trace_events (
     id TEXT PRIMARY KEY,
@@ -30,6 +29,9 @@ def _connect() -> sqlite3.Connection:
 
     conn = sqlite3.connect(FactorCatalog().db_path)
     conn.executescript(_DDL)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(trace_events)")}
+    if "hypothesis" not in cols:
+        conn.execute("ALTER TABLE trace_events ADD COLUMN hypothesis TEXT")
     return conn
 
 
@@ -48,6 +50,7 @@ def append_event(
     error: str | None = None,
     summary: str | None = None,
     extra: dict[str, Any] | None = None,
+    hypothesis: str | None = None,
 ) -> dict[str, Any]:
     """Append one event. Default parent/cites is the previous event id."""
     prev = last_event()
@@ -69,13 +72,14 @@ def append_event(
         "metrics": slim_metrics,
         "extra": extra or {},
         "created_at": now,
+        "hypothesis": hypothesis,
     }
     with _connect() as conn:
         conn.execute(
             """
             INSERT INTO trace_events
-                (id, action, parent_id, job_id, cites, summary, error, metrics_json, extra_json, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                (id, action, parent_id, job_id, cites, summary, error, metrics_json, extra_json, created_at, hypothesis)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 rec["id"],
@@ -88,6 +92,7 @@ def append_event(
                 json.dumps(slim_metrics, default=str),
                 json.dumps(rec["extra"], default=str),
                 rec["created_at"],
+                rec["hypothesis"],
             ),
         )
         conn.commit()
@@ -97,7 +102,7 @@ def append_event(
 def list_chain(limit: int = 50) -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, action, parent_id, job_id, cites, summary, error, metrics_json, extra_json, created_at "
+            "SELECT id, action, parent_id, job_id, cites, summary, error, metrics_json, extra_json, created_at, hypothesis "
             "FROM trace_events ORDER BY created_at DESC LIMIT ?",
             (max(1, int(limit)),),
         ).fetchall()
@@ -127,6 +132,60 @@ def list_chain(limit: int = 50) -> list[dict[str, Any]]:
                 "metrics": metrics,
                 "extra": extra,
                 "created_at": row[9],
+                "hypothesis": row[10],
+            }
+        )
+    return out
+
+
+def recent_failures(error: str | None = None, *, limit: int = 5) -> list[dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, action, parent_id, job_id, cites, summary, error, metrics_json, extra_json, created_at, hypothesis "
+            "FROM trace_events WHERE error IS NOT NULL AND error != '' ORDER BY created_at DESC"
+        ).fetchall()
+
+    def _normalize(e: str) -> str:
+        return e.split(":", 1)[0].strip().lower()
+
+    query_norm = _normalize(error) if error else ""
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if len(out) >= limit:
+            break
+
+        row_error = row[6]
+        if query_norm:
+            row_norm = _normalize(row_error)
+            if not (row_norm.startswith(query_norm) or query_norm.startswith(row_norm) or row_norm == query_norm):
+                continue
+
+        metrics: dict[str, Any] = {}
+        extra: dict[str, Any] = {}
+        if row[7]:
+            try:
+                metrics = json.loads(row[7])
+            except json.JSONDecodeError:
+                metrics = {}
+        if row[8]:
+            try:
+                extra = json.loads(row[8])
+            except json.JSONDecodeError:
+                extra = {}
+        out.append(
+            {
+                "id": row[0],
+                "action": row[1],
+                "parent_id": row[2],
+                "job_id": row[3],
+                "cites": row[4],
+                "summary": row[5],
+                "error": row[6],
+                "metrics": metrics,
+                "extra": extra,
+                "created_at": row[9],
+                "hypothesis": row[10],
             }
         )
     return out
@@ -148,6 +207,8 @@ def _slim_metrics(metrics: dict[str, Any] | None) -> dict[str, Any]:
         "skipped",
         "reason",
         "portfolio_return",
+        "verdict",
+        "n_checks",
     )
     out: dict[str, Any] = {}
     for key in keep:

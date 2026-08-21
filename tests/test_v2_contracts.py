@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from finaince.catalog.hooks import accept_library_entry
@@ -76,7 +75,6 @@ def test_reject_then_promote_again(isolated_home: Path) -> None:
 
 
 def test_eval_snapshot_compares_shipped_bundle(isolated_home: Path) -> None:
-    import os
 
     from finaince.eval.snapshot import run_snapshot
 
@@ -426,11 +424,12 @@ def test_rq_cache_roots_follow_finaince_home(isolated_home: Path, monkeypatch) -
 
 
 def test_to_library_writes_synthetic_report(isolated_home: Path) -> None:
-    from finaince.catalog.hooks import accept_pool_row
-    from finaince.catalog.store import FactorCatalog
     from reproagent.persistence.db import get_engine
     from reproagent.persistence.repository import Repository
     from reproagent.settings import Settings
+
+    from finaince.catalog.hooks import accept_pool_row
+    from finaince.catalog.store import FactorCatalog
 
     returns = {f"2024-07-{d:02d}": 0.03 for d in range(1, 13)}
     accept_pool_row(
@@ -538,8 +537,8 @@ def test_http_async_reproduce_polls_parent_to_terminal(
 
     from fastapi.testclient import TestClient
 
-    from finaince.serve import create_app
     import finaince.serve as serve_mod
+    from finaince.serve import create_app
 
     serve_mod.app = None
     client = TestClient(create_app())
@@ -571,10 +570,10 @@ def test_http_async_reproduce_polls_parent_to_terminal(
 
 
 def test_eval_equity_curve_has_ls_returns_on_thin_panel(isolated_home: Path) -> None:
-    import os
+
+    from reproagent.reproducer.metrics import serialize_equity_returns
 
     from finaince.settings import get_settings
-    from reproagent.reproducer.metrics import serialize_equity_returns
 
     out = evaluate(EvalRequest(expression="Rank(Delta(close, 1))", dialect="repro_polars"))
     assert out.ok is True

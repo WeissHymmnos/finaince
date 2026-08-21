@@ -736,8 +736,9 @@ def register_aiminer_fallbacks(app: FastAPI, *, reason: str) -> None:
         expression = str((body or {}).get("expression") or "").strip()
         if not expression:
             return {"ok": False, "message": "expression required"}
-        from finaince.eval.dialects import translate_from_qlib
         from reproagent.reproducer.polars_engine import validate_expression
+
+        from finaince.eval.dialects import translate_from_qlib
 
         candidates = [expression]
         translated = translate_from_qlib(expression)

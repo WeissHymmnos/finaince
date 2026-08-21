@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from finaince.domain.adapters import from_aiminer_dict, from_library_entry
 from finaince.catalog.store import FactorCatalog
+from finaince.domain.adapters import from_aiminer_dict, from_library_entry
 
 
 def _enabled() -> bool:

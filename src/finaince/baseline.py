@@ -15,7 +15,7 @@ LOCKED_WINDOW = {
 }
 
 
-def run_locked_baseline() -> dict[str, Any]:
+def run_locked_baseline(cost_bps: float = 0.0) -> dict[str, Any]:
     """Evaluate the locked expression on the shipped local fixture window."""
     import os
 
@@ -23,6 +23,7 @@ def run_locked_baseline() -> dict[str, Any]:
     from finaince.runtime import packaged_local_panel
 
     spec = dict(LOCKED_WINDOW)
+    spec["cost_bps"] = cost_bps
     packed = packaged_local_panel()
     if packed is None:
         return {
@@ -31,6 +32,7 @@ def run_locked_baseline() -> dict[str, Any]:
             "error": "missing_packaged_panel",
             "metrics": {"ic_mean": None, "sharpe_ratio": None, "rows": None, "universe_claim": spec["universe"]},
             "claim": spec["note"],
+            "cost_bps": cost_bps,
         }
     keys = ("LOCAL_DATA_PATH", "FINAINCE_LOCAL_DATA_PATH", "AIMINER_LOCAL_DATA_PATH")
     previous = {key: os.environ.get(key) for key in keys}
@@ -67,4 +69,5 @@ def run_locked_baseline() -> dict[str, Any]:
             "transaction_cost_bps": metrics.get("transaction_cost_bps"),
         },
         "claim": spec["note"],
+        "cost_bps": cost_bps,
     }

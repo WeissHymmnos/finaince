@@ -40,6 +40,7 @@ def run_snapshot(path: Path | None = None) -> dict[str, Any]:
                 start=item.get("start"),
                 end=item.get("end"),
                 universe=item.get("universe") or "local_panel",
+                cost_bps=3.0,
             )
         )
         got = {

@@ -197,7 +197,10 @@ def create_app() -> Any:
         cid = str(body.get("catalog_id") or "")
         if not cid:
             raise HTTPException(400, "catalog_id required")
-        return promote(cid, direction=str(body.get("direction") or "to_pool"))
+        direction = str(body.get("direction") or "to_pool")
+        if direction not in ("to_pool", "to_library"):
+            raise HTTPException(400, "direction must be to_pool|to_library")
+        return promote(cid, direction=direction)
 
     @app.get("/api/v1/jobs/{job_id}")
     def job_detail(request: Request, job_id: str) -> dict[str, Any]:
@@ -229,7 +232,6 @@ def create_app() -> Any:
     def eval_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         _require_desk(request)
         from finaince.eval.router import EvalRequest, evaluate
-
         from finaince.runtime import resolve_data_source
 
         backend = str(body.get("data_backend") or body.get("backend") or "auto")
@@ -261,6 +263,32 @@ def create_app() -> Any:
 
         return {"items": FactorCatalog().list_promotions("pending")}
 
+    @app.get("/api/v1/review/{promotion_id}/gates")
+    def review_gates(request: Request, promotion_id: str) -> dict[str, Any]:
+        _require_desk(request)
+        from finaince.catalog.store import FactorCatalog
+        from finaince.review.gates import evaluate_gates
+
+        promotions = {
+            item["id"]: item for item in FactorCatalog().list_promotions()
+        }
+        promo = promotions.get(promotion_id)
+        if not promo:
+            raise HTTPException(status_code=404, detail="unknown promotion")
+        record = FactorCatalog().get(promo["catalog_id"]) if promo.get("catalog_id") else None
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown catalog record")
+        verdict = evaluate_gates(record, direction=promo.get("direction") or "to_pool")
+        return {
+            "promotion_id": promotion_id,
+            "catalog_id": promo.get("catalog_id"),
+            "direction": verdict.get("direction"),
+            "passed": verdict.get("passed"),
+            "failures": verdict.get("failures"),
+            "details": verdict.get("details"),
+            "read_only": True,
+        }
+
     @app.post("/api/v1/review/{promotion_id}/approve")
     def review_approve(
         request: Request, promotion_id: str, body: dict[str, Any] | None = None
@@ -270,7 +298,18 @@ def create_app() -> Any:
 
         if (body or {}).get("override"):
             raise HTTPException(status_code=403, detail="http approve cannot honor override")
-        return approve(promotion_id, override=None)
+        adversary_raw = (body or {}).get("adversary", False)
+        if adversary_raw not in (True, False, None):
+            raise HTTPException(400, "adversary must be a boolean")
+        adversary = bool(adversary_raw)
+        return approve(promotion_id, override=None, adversary=adversary)
+
+    @app.post("/api/v1/review/{promotion_id}/adversary")
+    def review_adversary(request: Request, promotion_id: str) -> dict[str, Any]:
+        _require_desk(request)
+        from finaince.review.adversary import adversarial_review
+
+        return adversarial_review(promotion_id)
 
     @app.post("/api/v1/review/{promotion_id}/reject")
     def review_reject(request: Request, promotion_id: str) -> dict[str, Any]:
@@ -324,6 +363,20 @@ def create_app() -> Any:
 
         return run_locked_baseline()
 
+    @app.get("/api/v1/bench")
+    def bench_route(
+        request: Request,
+        is_start: str = "2019-01-01",
+        is_end: str = "2023-12-31",
+        oos_start: str = "2024-01-01",
+        oos_end: str = "2024-12-31",
+        cost_bps: float = 5.0,
+    ) -> dict[str, Any]:
+        _require_desk(request)
+        from finaince.data_track import run_bench
+
+        return run_bench(is_start=is_start, is_end=is_end, oos_start=oos_start, oos_end=oos_end, cost_bps=cost_bps)
+
     @app.post("/api/v1/impl")
     def impl_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         _require_desk(request)
@@ -332,6 +385,8 @@ def create_app() -> Any:
         source = str(body.get("source") or "")
         if not source.strip():
             raise HTTPException(400, "source required")
+        if len(source) > 20_000:
+            raise HTTPException(413, "source too large")
         return run_impl_job(source, name=str(body.get("name") or "isolated"), universe=str(body.get("universe") or "local_panel"))
 
     @app.post("/api/v1/impl/needs")
@@ -347,7 +402,13 @@ def create_app() -> Any:
         from finaince.jobs.runner import run_loop_job
 
         steps = int((body or {}).get("steps") or 2)
-        return run_loop_job(steps=steps)
+        sync = bool((body or {}).get("sync", True))
+        raw_exprs = (body or {}).get("expressions")
+        expressions: list[str] | None = None
+        if isinstance(raw_exprs, list):
+            cleaned = [str(e).strip() for e in raw_exprs if str(e).strip()]
+            expressions = cleaned or None
+        return run_loop_job(steps=steps, sync=sync, expressions=expressions)
 
     _attach_workbench_root(app)
 

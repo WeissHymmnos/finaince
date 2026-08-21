@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from finaince.eval.router import is_listed, listed_operators
-
 
 _QLIB_FIELD = re.compile(r"\$(close|open|high|low|volume|amount|vwap)\b", re.I)
 

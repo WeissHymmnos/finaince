@@ -36,10 +36,11 @@ def _record(**kwargs: object) -> FactorRecord:
 
 def test_nan_ic_is_missing_not_a_present_score(isolated_home: Path) -> None:
     """NaN must be missing_ic. Old gates used abs(NaN)<=0.005 which is False."""
+    from aiminer.pool_io import load_alpha_pool_rows
+
     from finaince.catalog.store import FactorCatalog
     from finaince.domain.adapters import from_library_entry
     from finaince.settings import get_settings
-    from aiminer.pool_io import load_alpha_pool_rows
 
     nan_rec = _record(id="fac_nan_ic", metrics=FactorMetrics(ic=float("nan")))
     gates = evaluate_gates(nan_rec, direction="to_pool")
@@ -104,6 +105,7 @@ def test_gates_reject_ic_threshold_and_correlated(isolated_home: Path) -> None:
 
 def test_approve_does_not_write_pool_when_gates_fail(isolated_home: Path) -> None:
     from aiminer.pool_io import load_alpha_pool_rows
+
     from finaince.catalog.store import FactorCatalog
     from finaince.settings import get_settings
 
@@ -131,6 +133,7 @@ def test_approve_does_not_write_pool_when_gates_fail(isolated_home: Path) -> Non
 
 def test_correlated_returns_fail_closed_against_pool(isolated_home: Path) -> None:
     from aiminer.pool_io import persist_alpha_pool_rows
+
     from finaince.settings import get_settings
 
     settings = get_settings()
@@ -239,6 +242,7 @@ def test_eval_rejects_invalid_window_and_cost(isolated_home: Path) -> None:
 
 def test_uncorrelatable_pool_row_does_not_block_unique_factor(isolated_home: Path) -> None:
     from aiminer.pool_io import persist_alpha_pool_rows
+
     from finaince.settings import get_settings
 
     settings = get_settings()

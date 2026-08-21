@@ -31,8 +31,14 @@ def promote(catalog_id: str, *, direction: str, yes: bool = False) -> dict[str, 
     return {"ok": True, "promotion_id": pid, "status": "review", "gates": gates, "confirmed": yes}
 
 
-def approve(promotion_id: str, *, override: list[str] | None = None) -> dict[str, Any]:
+def approve(promotion_id: str, *, override: list[str] | None = None, adversary: bool = False) -> dict[str, Any]:
     from finaince.catalog.audit import append as audit_append
+
+    if adversary:
+        from finaince.review.adversary import adversarial_review
+        adv_res = adversarial_review(promotion_id)
+        if adv_res["verdict"] == "rejected":
+            return {"ok": False, "error": "adversary_rejected", "adversary": adv_res}
 
     cat = FactorCatalog()
     pending = [p for p in cat.list_promotions("pending") if p["id"] == promotion_id]
@@ -55,6 +61,7 @@ def approve(promotion_id: str, *, override: list[str] | None = None) -> dict[str
         if not rec.daily_returns:
             return {"ok": False, "error": "empty_returns", "gates": gates}
         from aiminer.pool_io import persist_alpha_pool_rows
+
         from finaince.domain.adapters import mapped_aiminer_code
 
         mapped = to_aiminer_dict(rec)
@@ -71,8 +78,17 @@ def approve(promotion_id: str, *, override: list[str] | None = None) -> dict[str
     rec.status = "ready"
     cat.upsert(rec)
     cat.update_promotion(promotion_id, "approved")
-    gates["override"] = {"thin_panel": "thin_panel" in (override or [])}
-    audit_append("approve", {"promotion_id": promotion_id, "catalog_id": rec.id})
+    if adversary:
+        gates["adversary"] = adv_res
+    gates["override"] = {
+        "thin_panel": "thin_panel" in (override or []),
+        "weak_ic": "weak_ic" in (override or []),
+        "inflated_sharpe": "inflated_sharpe" in (override or []),
+    }
+    audit_detail = {"promotion_id": promotion_id, "catalog_id": rec.id}
+    if adversary:
+        audit_detail["adversary_checked"] = True
+    audit_append("approve", audit_detail)
     try:
         from finaince.obs import emit
 
@@ -106,18 +122,18 @@ def reject(promotion_id: str) -> dict[str, Any]:
 
 def _write_library(rec) -> None:
     from datetime import UTC, datetime
-    from pathlib import Path
     from uuid import uuid4
 
+    from reproagent.library.manager import FactorLibraryManager
+    from reproagent.library.versioning import compute_dedup_hash
     from reproagent.models.factor_def import FactorDefinition
     from reproagent.models.library import FactorLibraryEntry
     from reproagent.models.report import ResearchReport
-    from reproagent.library.manager import FactorLibraryManager
-    from reproagent.library.versioning import compute_dedup_hash
     from reproagent.persistence.db import get_engine, init_db
     from reproagent.persistence.paths import AppPaths
     from reproagent.persistence.repository import Repository
     from reproagent.settings import Settings
+
     from finaince.settings import get_settings
 
     settings = get_settings()

@@ -149,8 +149,8 @@ def test_real_cli_reproduce_catalog_eval_promote(tmp_path: Path) -> None:
 
 def test_real_http_desk_against_cli_home(tmp_path: Path) -> None:
     """Same isolated home: CLI reproduce, then live uvicorn + httpx (not TestClient)."""
-    import httpx
     import finreportparser.output  # noqa: F401
+    import httpx
     assert MINIMAL_PDF.is_file(), f"missing fixture {MINIMAL_PDF}"
 
     home = tmp_path / "fa-http"

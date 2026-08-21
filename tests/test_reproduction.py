@@ -8,9 +8,9 @@ from finaince.reproduction import reproduce_report, validate_expression
 
 
 def test_reproduce_report_on_minimal_fixture(sample_report_path: Path, offline_settings) -> None:
-    import finreportparser.output  # noqa: F401
     import inspect
 
+    import finreportparser.output  # noqa: F401
     from reproagent.pipeline import reproduce_report as shipped
 
     source = inspect.getsource(reproduce_report)

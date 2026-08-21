@@ -6,13 +6,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import pytest
-
 from finaince.catalog.hooks import accept_library_entry
 from finaince.catalog.store import FactorCatalog
 from finaince.serve import create_app
 from tests.conftest import desk_headers
-
 
 FRONTEND = Path(__file__).resolve().parents[2] / "aiminer" / "frontend"
 

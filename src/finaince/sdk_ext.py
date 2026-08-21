@@ -246,7 +246,52 @@ async def discover_swarm_tool(args: dict[str, Any]) -> dict[str, Any]:
     return _json_content(handle_discover_swarm(sync=bool(sync)))
 
 
+@tool(
+    "recent_failures",
+    "Retrieve recent failed trace events by error prefix before re-drafting an impl.",
+    {"error": str, "limit": int},
+)
+async def recent_failures_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from finaince.tools import handle_recent_failures
+
+    error = args.get("error")
+    if error == "":
+        error = None
+    limit = args.get("limit")
+    if limit is None:
+        limit = 5
+    return _json_content(handle_recent_failures(error=error, limit=int(limit)))
+
+
+@tool(
+    "research_context",
+    "Diverse low-correlation factor samples + recent failure lessons to ground the next proposal.",
+    {"error_prefix": str, "sample_limit": int, "lesson_limit": int},
+)
+async def research_context_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from finaince.tools import handle_research_context
+
+    error_prefix = args.get("error_prefix")
+    if error_prefix == "":
+        error_prefix = None
+    sample_limit = args.get("sample_limit")
+    if sample_limit is None:
+        sample_limit = 5
+    lesson_limit = args.get("lesson_limit")
+    if lesson_limit is None:
+        lesson_limit = 5
+    return _json_content(
+        handle_research_context(
+            error_prefix=error_prefix,
+            sample_limit=int(sample_limit),
+            lesson_limit=int(lesson_limit),
+        )
+    )
+
+
 CUSTOM_TOOLS = [
+    recent_failures_tool,
+    research_context_tool,
     cull_factor_pool_tool,
     score_factor_tool,
     reproduce_report_tool,

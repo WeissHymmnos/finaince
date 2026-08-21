@@ -15,7 +15,7 @@ from finaince.catalog.store import FactorCatalog
 from finaince.eval.router import EvalRequest, evaluate
 from finaince.isolate import child_isolate, upsert_isolated
 from finaince.serve import create_app
-from tests.conftest import MINIMAL_PDF, desk_headers
+from tests.conftest import desk_headers
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,6 +43,7 @@ def _json(text: str) -> dict:
 
 def test_cli_approve_override_writes_pool_code(isolated_home: Path) -> None:
     from aiminer.pool_io import load_alpha_pool_rows
+
     from finaince.settings import get_settings
 
     class _F:
@@ -75,7 +76,7 @@ def test_cli_approve_override_writes_pool_code(isolated_home: Path) -> None:
     approved = _json(
         _cli(
             isolated_home,
-            ["review", "--approve", promo["promotion_id"], "--override", "thin_panel"],
+            ["review", "--approve", promo["promotion_id"], "--override", "thin_panel,homogeneous"],
         ).stdout
     )
     assert approved["ok"] is True, approved
@@ -154,7 +155,7 @@ def test_packaged_spa_without_sibling_dist(isolated_home: Path, monkeypatch) -> 
     page = client.get("/")
     assert page.status_code == 200
     assert "FinAlpha" in page.text
-    assert 'id="root"' in page.text
+    assert 'id="pane-catalog"' in page.text and 'id="pane-review"' in page.text
     assert "frontend not built" not in page.text.lower()
     assert "spa disabled" not in page.text.lower()
 

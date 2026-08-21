@@ -13,9 +13,8 @@ from finaince.isolate import child_isolate, run_isolated, similar_errors, upsert
 from finaince.loop import choose_next_action, run_loop, train_linear_head
 from finaince.review.gates import evaluate_gates
 from finaince.serve import create_app
-from tests.conftest import desk_headers
 from finaince.trace import list_chain
-
+from tests.conftest import desk_headers
 
 GOOD_SRC = """
 NAME = "iso_mom"
@@ -140,7 +139,6 @@ def test_empty_extract_stays_no_factors_described_needs_impl(isolated_home: Path
 
 
 def test_loop_alternates_factor_and_model(isolated_home: Path) -> None:
-    import os
 
     assert choose_next_action([]) == "factor"
     assert choose_next_action([{"action": "factor", "ok": True, "metrics": {"return_points": 8}}]) == "model"
@@ -171,10 +169,17 @@ def test_loop_alternates_factor_and_model(isolated_home: Path) -> None:
         assert (out.get("model_config") or {}).get("coef")
     else:
         assert out.get("skip_reason") or out.get("degraded")
+        
+    from finaince.trace import list_chain
+    chain = list_chain(limit=10)
+    for ev in chain:
+        if ev["action"] in ("loop_factor", "loop_model"):
+            assert ev.get("hypothesis")
+            assert ev.get("extra", {}).get("via") == "heuristic"
+
 
 
 def test_http_loop_and_impl(isolated_home: Path) -> None:
-    import os
 
     import finaince.serve as serve_mod
 
@@ -239,3 +244,200 @@ def test_locked_baseline_is_local_panel_not_paper_arr(isolated_home: Path) -> No
     assert isinstance(out["ok"], bool)
     if out["ok"]:
         assert out["metrics"].get("rows") is not None
+
+def test_advise_action_heuristic(isolated_home: Path) -> None:
+    import os
+
+    from finaince.loop import advise_action
+    
+    if "FINAINCE_LOOP_ADVISOR" in os.environ:
+        del os.environ["FINAINCE_LOOP_ADVISOR"]
+        
+    advice = advise_action([])
+    assert advice["via"] == "heuristic"
+    assert advice["action"] == "factor"
+    assert "first step" in advice["hypothesis"]
+    
+    advice2 = advise_action([{"action": "factor", "ok": True, "metrics": {"return_points": 8}}])
+    assert advice2["via"] == "heuristic"
+    assert advice2["action"] == "model"
+    assert "ols_linear head" in advice2["hypothesis"]
+
+def test_advise_action_llm_fallback(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+    from finaince.loop import advise_action
+    
+    monkeypatch.setenv("FINAINCE_LOOP_ADVISOR", "1")
+    
+    def mock_resolve_llm(*args, **kwargs):
+        raise ValueError("broken resolver")
+        
+    import finaince.runtime
+    monkeypatch.setattr(finaince.runtime, "resolve_llm", mock_resolve_llm)
+    
+    advice = advise_action([])
+    assert advice["via"] == "heuristic"
+    assert advice["action"] == "factor"
+    assert "advisor_error" in advice
+    assert "broken resolver" in advice["advisor_error"]
+
+def test_run_loop_job_async(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import finaince.jobs.runner as runner_mod
+    from finaince.jobs.runner import run_loop_job
+    
+    calls = []
+    def mock_start_process(kind, payload, argv):
+        calls.append((kind, payload, argv))
+        return runner_mod.submit(kind, payload)
+        
+    monkeypatch.setattr(runner_mod, "start_process", mock_start_process)
+    
+    job = run_loop_job(steps=3, sync=False)
+    assert job["status"] == "queued"
+    
+    assert len(calls) == 1
+    kind, payload, argv = calls[0]
+    assert kind == "research_loop"
+    assert payload["steps"] == 3
+    assert "loop" in argv
+    assert "--steps" in argv
+    assert "3" in argv
+    assert "--sync" in argv
+
+def test_http_loop_async(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import finaince.jobs.runner as runner_mod
+    import finaince.serve as serve_mod
+    
+    calls = []
+    def mock_start_process(kind, payload, argv):
+        calls.append((kind, payload, argv))
+        return runner_mod.submit(kind, payload)
+        
+    monkeypatch.setattr(runner_mod, "start_process", mock_start_process)
+    
+    serve_mod.app = None
+    client = TestClient(create_app())
+    
+    looped = client.post("/api/v1/loop", json={"steps": 3, "sync": False}, headers=desk_headers())
+    assert looped.status_code == 200
+    body = looped.json()
+    assert body["status"] == "queued"
+    
+    assert len(calls) == 1
+    kind, payload, argv = calls[0]
+    assert kind == "research_loop"
+    assert payload["steps"] == 3
+    assert "--sync" in argv
+
+def test_run_loop_with_expressions(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import finaince.loop as loop_mod
+    from finaince.loop import run_loop
+    
+    call_count = 0
+    def mock_advise_action(history):
+        nonlocal call_count
+        action = "factor" if call_count % 2 == 0 else "model"
+        call_count += 1
+        return {"action": action, "hypothesis": "mock", "via": "mock"}
+        
+    monkeypatch.setattr(loop_mod, "advise_action", mock_advise_action)
+    
+    out = run_loop(expressions=["Rank(Delta(close, 1))", "Rank(Delta(close, 2))"], steps=4)
+    assert out.get("ok") is True
+    assert "factor" in out["actions"]
+    assert "model" in out["actions"]
+    
+    evaluated = out.get("expressions_evaluated") or []
+    assert len(evaluated) == 2
+    assert evaluated[0]["expression"] == "Rank(Delta(close, 1))"
+    assert evaluated[1]["expression"] == "Rank(Delta(close, 2))"
+
+def test_run_loop_queue_exhaustion(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import finaince.loop as loop_mod
+    from finaince.loop import run_loop
+    
+    def mock_advise_action(history):
+        return {"action": "factor", "hypothesis": "mock", "via": "mock"}
+        
+    monkeypatch.setattr(loop_mod, "advise_action", mock_advise_action)
+    
+    out = run_loop(expressions=["Rank(Delta(close, 1))"], steps=4)
+    assert out.get("degraded") == "expression_queue_empty"
+    
+    evaluated = out.get("expressions_evaluated") or []
+    assert len(evaluated) == 1
+    assert evaluated[0]["expression"] == "Rank(Delta(close, 1))"
+
+def test_run_model_step_uses_model_head(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import finaince.model_head as model_head
+    from finaince.loop import run_model_step
+    
+    def mock_train_head(returns, *, kind=None):
+        return {"skipped": True, "reason": "mocked_skip", "model_config": {"kind": "mock"}}
+        
+    monkeypatch.setattr(model_head, "train_head", mock_train_head)
+    
+    step = run_model_step({"daily_returns": {"2024-01-01": 0.01}})
+    assert step.get("skipped") is True
+    assert step.get("reason") == "mocked_skip"
+    assert step.get("model_config", {}).get("kind") == "mock"
+
+def test_advise_action_llm_with_coaching(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+    import httpx
+
+    import finaince.coaching as coaching
+    import finaince.runtime
+    from finaince.loop import advise_action
+    
+    monkeypatch.setenv("FINAINCE_LOOP_ADVISOR", "1")
+    
+    def mock_resolve_llm():
+        return {"base_url": "http://mock", "model": "mock-model", "api_key": "mock-key"}
+        
+    monkeypatch.setattr(finaince.runtime, "resolve_llm", mock_resolve_llm)
+    
+    def mock_research_context(*, error_prefix=None, sample_limit=5, lesson_limit=5):
+        return {
+            "ok": True,
+            "samples": [{"expression": "MockExpr(1)", "ic": "0.05"}],
+            "lessons": [{"error_head": "MockError", "summary_short": "MockSummary"}]
+        }
+        
+    monkeypatch.setattr(coaching, "research_context", mock_research_context)
+    
+    captured_prompt = []
+    
+    class MockResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"choices": [{"message": {"content": '{"action": "factor", "hypothesis": "mock"}'}}]}
+            
+    def mock_post(url, headers, json, timeout):
+        captured_prompt.append(json["messages"][0]["content"])
+        return MockResponse()
+        
+    monkeypatch.setattr(httpx, "post", mock_post)
+    
+    advice = advise_action([])
+    assert advice["via"] == "llm"
+    assert advice["action"] == "factor"
+    
+    assert len(captured_prompt) == 1
+    prompt = captured_prompt[0]
+    assert "known diverse factors: MockExpr(1) (ic=0.05)" in prompt
+    assert "recent failure: MockError — MockSummary" in prompt
+
+def test_cli_loop_cmd_expressions(isolated_home: Path) -> None:
+    from typer.testing import CliRunner
+
+    from finaince.cli import app
+    
+    runner = CliRunner()
+    result = runner.invoke(app, ["loop", "--steps", "2", "--expression", "Expr1", "--expression", "Expr2"])
+    assert result.exit_code == 0
+    
+    import json
+    out = json.loads(result.stdout)
+    assert out.get("kind") == "research_loop"
+    assert out.get("payload", {}).get("expressions") == ["Expr1", "Expr2"]

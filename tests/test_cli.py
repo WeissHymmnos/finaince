@@ -38,10 +38,10 @@ def test_finreportparser_is_finpdfpro_latest() -> None:
 
 
 def test_layout_extractor_uses_finpdfpro_v05_pipeline(tmp_path) -> None:
-    import finreportparser.output  # noqa: F401
     from datetime import UTC, datetime
     from pathlib import Path
 
+    import finreportparser.output  # noqa: F401
     from reproagent.models.report import ResearchReport
     from reproagent.parser.layout_extractor import LayoutExtractor
     from reproagent.settings import Settings

@@ -81,12 +81,11 @@ def retag_synthetic() -> dict[str, Any]:
             tagged += 1
     reports = 0
     try:
-        from sqlmodel import Session, select
-
         from reproagent.persistence.db import get_engine, init_db
         from reproagent.persistence.repository import Repository
         from reproagent.persistence.tables import ReportTable
         from reproagent.settings import Settings
+        from sqlmodel import Session, select
 
         settings = get_settings()
         st = Settings(data_dir=settings.repro_data_dir)
