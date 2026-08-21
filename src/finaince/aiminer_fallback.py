@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 
 _WIKILINK = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 
@@ -718,19 +718,6 @@ def register_aiminer_fallbacks(app: FastAPI, *, reason: str) -> None:
         path.unlink()
         return {"status": "deleted", "strategy_id": strategy_id}
 
-    @app.get("/api/strategies/{strategy_id}/charts/{kind}")
-    def strategy_chart(strategy_id: str, kind: str) -> FileResponse:
-        if kind not in {"equity", "turnover"}:
-            raise HTTPException(400, "invalid chart kind")
-        payload = _read_json(_strategy_path(strategy_id))
-        if payload is None:
-            raise HTTPException(404, "strategy not found")
-        chart_paths = payload.get("chart_paths") if isinstance(payload.get("chart_paths"), dict) else {}
-        path = chart_paths.get(kind)
-        if not path or not Path(str(path)).is_file():
-            raise HTTPException(404, "chart not found")
-        return FileResponse(str(path), media_type="image/png")
-
     @app.post("/api/backtest/validate")
     def backtest_validate(body: dict[str, Any] | None = None) -> dict[str, Any]:
         expression = str((body or {}).get("expression") or "").strip()
@@ -819,16 +806,6 @@ def register_aiminer_fallbacks(app: FastAPI, *, reason: str) -> None:
             raise HTTPException(404, "backtest job not found")
         path.unlink()
         return {"status": "deleted", "job_id": job_id}
-
-    @app.get("/api/charts/{job_id}")
-    def charts(job_id: str) -> FileResponse:
-        payload = _read_json(_backtest_path(job_id)) or {}
-        chart = payload.get("chart_path")
-        if isinstance(payload.get("chart_paths"), dict):
-            chart = chart or payload["chart_paths"].get("equity")
-        if chart and Path(str(chart)).is_file():
-            return FileResponse(str(chart), media_type="image/png")
-        raise HTTPException(404, "chart not found")
 
     @app.get("/api/reports/{factor_id}")
     def factor_report(factor_id: str) -> PlainTextResponse:
