@@ -11,6 +11,8 @@
 
 ---
 
+> 勘误（2026-08）：本文为历史设计文档。§7 的 `review list|approve|reject <id>` 子命令语法与通用 `POST /api/v1/jobs` 端点从未实现；实际接口以 docs/handbook.md 为准（review 用 `--approve/--reject/--override` 选项；job 提交走 `/api/v1/reproduce` 与 `/api/v1/loop`）。门禁与 CLI 的最新清单见 handbook §5/§6。
+
 ## Overview
 
 `finaince`（`/home/wh/Documents/finaince`，2026-08-13 新建）目前是一层 **薄门面**：Typer CLI + Claude Agent SDK in-process MCP，通过 `sys.path` hack（`finaince._paths.ensure_import_paths`）把兄弟目录 `aiminer/src` 与 `reproagent/src` 塞进解释器。它不拥有因子对象、不拥有库、不拥有求值、不拥有任务、不拥有配置。默认 `finaince discover` 走写死演示（`if demo or True`），真正的挖掘只在显式 `--swarm` 时才转发到 `aiminer.manager.main`。

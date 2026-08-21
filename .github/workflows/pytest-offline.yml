@@ -56,3 +56,6 @@ jobs:
           uv pip install -e ../finpdfpro
           .venv/bin/python -c "import finreportparser; from pathlib import Path; p=Path(finreportparser.__file__); print(finreportparser.__version__, p); assert 'finpdfpro' in str(p) or str(finreportparser.__version__).startswith('0.5')"
           .venv/bin/python -m pytest tests --ignore=tests/test_live_real.py -m "not live" -q --tb=short
+      - name: Ruff lint (non-blocking on stock warnings)
+        continue-on-error: true
+        run: .venv/bin/python -m ruff check src tests

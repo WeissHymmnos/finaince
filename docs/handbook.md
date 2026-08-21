@@ -207,21 +207,27 @@ finaince --help
 
 | 命令 | 做什么 |
 |---|---|
-| `doctor` | 检查家目录、import、panel、qlib child、LLM |
-| `baseline` | 用自带的两只股票跑一遍固定窗口 |
-| `eval EXPR --dialect repro_polars\|qlib --backend local\|ricequant` | 按方言和数据后端评测 |
+| `doctor` | 检查家目录、import、panel、qlib child、LLM（`--audit-check` 重放审计哈希链；`--watch/--iterations/--interval` 常驻） |
+| `baseline` | 用自带的两只股票跑一遍固定窗口（`run_locked_baseline(cost_bps=…)` 支持含成本口径） |
+| `eval EXPR --dialect repro_polars\|qlib --backend local\|ricequant\|auto` | 按方言和数据后端评测；`--start/--end` 锁窗；`--snapshot` 对金标快照（漂移只告警）；`--engine-parity` 可选 3.10 qlib 子进程对拍。成本参数 `cost_bps` 目前是 `EvalRequest` 编程接口，CLI/HTTP 未暴露 |
 | `validate EXPR` | 用 polars 引擎校验表达式 |
-| `impl PATH.py --name … --universe local_panel` | 隔离执行 `compute(panel)`，写入 catalog |
-| `reproduce PDF --sync` | 摄入研报并回测 |
-| `catalog` | 列出 catalog |
-| `library` | 先搜 catalog，再搜引擎库 |
+| `impl PATH.py --name NAME --universe local_panel` | 隔离执行 `compute(panel)`，写入 catalog |
+| `reproduce PDF --sync [--start --end --source]` | 摄入研报并回测，可锁窗、选数据源 |
+| `catalog [--source SRC] [--rebuild] [--retag-synthetic]` | 列出 / 重建 catalog（rustminer 只读源） |
+| `library [-q QUERY] [--style STYLE]` | 先搜 catalog（可按 style 过滤），再搜引擎库 |
 | `promote ID --to to_pool --yes` | 提交审核 |
-| `review` / `review --approve ID --override thin_panel` | 查看队列，或放行一条 |
+| `review` / `--approve ID --override thin_panel,weak_ic` / `--reject ID` | 查看队列、放行（override 仅限列名门禁）、退回 candidate |
 | `discover --demo` | 不调 LLM，做一轮 IC / 相关 cull |
-| `discover --swarm` | 启动 aiminer manager swarm（需要 LLM） |
+| `discover --swarm --sync/--async` | 启动 aiminer manager swarm（需要 LLM）；裸 `discover` 退出码 2 |
 | `serve --host 127.0.0.1 --port 8000` | 打开同源工作台 |
-| `jobs` / `trace` / `loop` | 作业、事件链、薄组合环 |
-| `agent` / `sdk-info` / `sdk-query` | Claude Agent desk |
+| `jobs [--cancel ID]` | 作业列表 / 取消 |
+| `trace [--limit N]` | 研究事件链（每条带 hypothesis） |
+| `loop [--steps N] [--expression EXPR]... [--sync/--async]` | 因子/模型交替环，支持表达式队列批量；模型步自动尝试跨 ready 因子动态组合（WS-I） |
+| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps）；`--sync` 需米筐凭据先抓缓存 |
+| `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
+| `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
+| `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |
+| `sdk-info` / `sdk-query --prompt` | SDK 会话信息 / 直查 |
 
 ---
 
@@ -231,14 +237,39 @@ finaince --help
 
 | 门禁 | 何时触发 |
 |---|---|
-| `thin_panel` | 载入的 panel 股票数少于 20，和 universe 字符串无关 |
+| `simulated` | 因子被判定为模拟指标 |
 | `formula_proxy` | 复现用了公式代理 |
+| `thin_panel` | 载入的 panel 股票数少于 20，和 universe 字符串无关 |
 | `missing_ic` | IC 缺失，或不是有限数字 |
+| `ic_threshold` | 有限 IC 的绝对值不超过 0.005 |
 | `missing_returns` | 没有日收益 |
-| `weak_ic` | 有限 IC 的绝对值不超过 0.005 |
-| `correlated` | 与 pool 里已有因子的收益相关超过 0.7 |
+| `correlated` | 收益相关超过 0.7：to_pool 对照 pool 里已有因子；to_library 还会对照 catalog 里带日收益的 reproduction 行 |
+| `empty_code` | to_pool 时 qlib 表达式为空 |
+| `weak_ic` | Harvey-Liu t 统计量：\|ICIR\|·√n_days < 3.0（样本不足时跳过并记 `insufficient_for_t_stat`） |
+| `inflated_sharpe` | Deflated Sharpe < 0.95（Bailey–López de Prado；试验次数从 trace 的 eval/impl 事件数估计，少于 20 个观测跳过） |
+| `homogeneous` | WS-A 结构查重：与种子库/catalog 行的最大 AST 子树相似度 > 0.85（表达式解析失败时放行，由正则校验兜底） |
+| `overcomplex` | WS-A 复杂度上限：符号长度 > 40 或自由参数 > 6 或特征数 > 8（阈值先宽后紧） |
+| `corr_error:{exc}` | 相关性检查本身抛错，fail-closed |
 
-CLI 可以用 `--override thin_panel`，审计日志会记一笔。HTTP 拒绝一切 `override`。
+`weak_ic`、`inflated_sharpe`、`homogeneous`、`overcomplex` 和 `thin_panel` 一样可以用 CLI `--override` 放行，审计日志会记一笔。HTTP 拒绝一切 `override`。
+
+生成端正则化（WS-A）：候选入池前在 `cull_factor_pool` 做结构去重——近重复表达式（规范化后等价或相似度 > 0.85）直接淘汰并记 reason；catalog upsert 时写 `expr_hash` 列支持 O(1) 查重。sign-reflection（WS-C）：负 IC 且 \|t\|≥3 的候选生成镜像行一并评分。
+
+---
+
+## 6.1 研究循环与对抗评审
+
+- `finaince loop` 让因子步和模型步交替：因子步按表达式队列逐条评测（`--expression` 可重复），模型步用可切换预测头（环境变量 `FINAINCE_MODEL_HEAD=ols|gbm`，GBM 走 expanding-window walk-forward，库缺失诚实跳过）。`--sync/--async` 决定是否走 JobRunner 子进程。
+- `FINAINCE_LOOP_ADVISOR=1` 时动作选择先问聊天 LLM（读最近 trace 历史 + 低相关样例 + 失败教训）；任何失败都回落启发式并记录 `advisor_error`。
+- SDK 工具 `research_context` 返回 CSS 式低相关样例与失败教训，playbook 要求提出新因子前先调它。
+- 晋升可选对抗评审：`review --approve ID` 加 adversary 开关或 `POST /api/v1/review/{id}/adversary`。它在**子进程全新上下文里重跑同一条评测**，比对 IC/Sharpe 容差、检查 proxy 与收益存在性；拒绝则 veto，行留在 review。默认关。
+
+## 6.2 超越型工作流（v3 计划落地件）
+
+- **WS-H 代码因子进化**（`code_evolution.py`）：LLM 写完整 `compute(panel)` → bwrap/冻结沙箱子进程执行 → shipped eval + 全门禁；失败按 error 前缀检索相似教训 + AST-diff 编辑动机改写下一稿。无 LLM 时停在 `llm_unavailable`，绝不假装迭代。
+- **WS-I 动态组合**（`combination.py`）：跨 catalog ready 因子按滚动逆波动率做每日权重组合（只用 t-1 前信息），换手付双边成本；loop 模型步自动尝试，bandit 奖励升级为净 Sharpe。
+- **WS-L 过程记忆**（`process_memory.py`）：信用分配用「门禁+对抗存活」而非原始残差；AST-diff 编辑动机按错误类加权记忆注入 advisor prompt；经验链作为展示层（链尾扩展须 RankIC 超全链）。
+- **WS-F 工作台**：wheel 内 stub SPA 升级为三栏（Catalog / Review 队列含 gates 报告与对抗按钮 / Trace 时间线），纯静态零构建链。
 
 ---
 
@@ -249,9 +280,15 @@ CLI 可以用 `--override thin_panel`，审计日志会记一笔。HTTP 拒绝�
 | 路径 | 鉴权 |
 |---|---|
 | `GET /`、`GET /api/v1/health`、`GET /api/v1/baseline` | 公开 |
-| `GET /api/v1/catalog`、`/review`、`/jobs`、`/audit`、`/trace` | 需要 desk token |
-| `POST` promote / eval / approve / reject / reproduce / impl / agent / loop | 需要 desk token |
+| `GET /api/v1/catalog`、`/catalog/{id}`（可带 `?embed=memory`）、`/review`、`/jobs`、`/jobs/{id}`、`/audit`、`/trace` | 需要 desk token |
+| `GET /api/v1/review/{id}/gates` | 只读门禁报告（不改状态），需要 desk token |
+| `GET /api/v1/bench` | WS-D 双窗基准表（JSON，含 provenance 与 Markdown），需要 desk token |
+| `POST` promote / eval / approve / reject / adversary / reproduce / impl / impl/needs / agent / loop | 需要 desk token |
+| `POST /api/v1/jobs/{id}/cancel` | 需要 desk token |
 | `POST /api/v1/review/{id}/approve` 且 body 带 `{"override":[…]}` | **403** |
+| `POST /api/v1/review/{id}/approve` 且 body 带 `{"adversary":true}` | 允许；对抗评审拒绝时返回 `adversary_rejected`，行留在 review |
+| `POST /api/v1/review/{id}/adversary` | 只出 fresh-context 重评报告，不做决定 |
+| `POST /api/v1/loop` body 可带 `{"expressions":[…]}` 与 `{"sync":false}` | 批量表达式队列 + 异步 job |
 | `POST /api/v1/reproduce` 且 PDF 不在 `FINAINCE_PDF_ROOT` 下 | **403** |
 
 Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINCE_DESK_TOKEN` 会同步到 `AIMINER_AUTH_TOKEN`，aiminer 的 `/api/*` 写操作同样要带这个口令。
@@ -275,6 +312,22 @@ Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINC
 | `RQ_TOKEN` / `RQ_USER`+`RQ_PASS` | 米筐，可选 |
 | `FINAINCE_LLM_PROVIDER` / `FINAINCE_LLM_MODEL` / `FINAINCE_LLM_API_KEY` / `FINAINCE_LLM_BASE_URL` | 聊天模型，可选。不默认任何厂商 |
 | `FINAINCE_LIVE_AGENT=1` | 打开 live Claude 测试 |
+| `FINAINCE_PANEL_PATH` | 指向完整行情 parquet（列结构与自带 prices.parquet 一致），替换 smoke 面板 |
+| `FINAINCE_BT_START` / `FINAINCE_BT_END` | 覆盖默认回测窗 |
+| `FINAINCE_LOCAL_DATA_PATH` | 本地数据目录（qlib child 也读） |
+| `FINAINCE_CATALOG=0` | 关掉引擎→catalog 双写 hook |
+| `FINAINCE_CATALOG_MEMORY=1` | catalog 详情默认 embed memory 摘要 |
+| `FINAINCE_LOOP_ADVISOR=1` | loop 动作选择先问聊天 LLM，失败回落启发式 |
+| `FINAINCE_MODEL_HEAD=ols\|gbm` | loop 模型头选择；gbm 需装 `.[gbm]` |
+| `FINAINCE_PANEL_CACHE=off` | 关掉 WS-C 进程级 panel 缓存（默认开，仅 local 后端） |
+| `FINAINCE_MAX_JOBS=N` | 异步子进程并发上限（默认 2，超限返回 `max_jobs_reached`） |
+| `FINAINCE_SANDBOX=bwrap\|auto\|off` | WS-E 沙箱层：auto 检测到 bwrap 即用；失败自动回落冻结内建并标注 `sandbox_fallback` |
+| `BRAIN_USER` / `BRAIN_PASS` | WS-J BRAIN 外部裁决凭据；缺失时降级为内部双窗基准并在输出声明 |
+| `FINAINCE_QLIB_SUBPROCESS=1` | qlib 评测走 3.10 子进程（配 `AIMINER_PYTHON`） |
+| `FINAINCE_QLIB_BACKEND` / `FINAINCE_QLIB_TIMEOUT` | 子进程 qlib 的数据后端与超时 |
+| `AIMINER_PYTHON` | 3.10 conda 解释器路径（swarm / qlib 子进程） |
+| `AIMINER_INCLUDE_SPA=1` | 允许挂 aiminer 前端 dist |
+| `FINAINCE_JOB_ID` | 异步子进程回写同一 job 行（内部使用） |
 
 ---
 

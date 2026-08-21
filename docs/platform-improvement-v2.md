@@ -12,6 +12,8 @@
 
 ---
 
+> 勘误（2026-08）：本文为历史设计文档。§API 中通用 `POST /api/v1/jobs {kind, payload}` 端点从未实现；job 提交走 `/api/v1/reproduce` 与 `/api/v1/loop`，取消走 `POST /api/v1/jobs/{id}/cancel`。实际接口以 docs/handbook.md 为准。
+
 ## Overview
 
 第一代方案已经把 `finaince` 从「双引擎遥控器」做成了**平台壳**：`FactorRecord` + `platform.db` catalog、`(dialect, data_backend)` 求值路由、`promote → review → approve` 晋升、JobRunner、同源 `/api/v1` + aiminer `/api`、Claude Agent SDK 研究台、`FINAINCE_HOME`、跨平台 `compat`。这些不是规划，而是 2026-08-13 之后对照源码和 live 跑通的事实。

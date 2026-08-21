@@ -85,21 +85,21 @@ FinAlpha 是**中国卖方研究台**：人打开 `finaince serve`，用 catalog
 
 ## 4. 还剩的真差距（骨架已落地之后）
 
-### 4.1 链在，过夜环不在
+### 4.1 链在，过夜环不在（部分已落地）
 
-`trace_events` 能复盘「后一步 cite 前一步」。还没有：假设正文、LLM 读整段历史再决定、JobRunner 上的多小时无人值守。`finaince agent` 仍是一轮工具调用。
+`trace_events` 能复盘「后一步 cite 前一步」，且 hypothesis 正文已落 trace。过夜环已可经 JobRunner 异步 research_loop 承载（LLM 读历史为可选 advisor，默认启发式）。`finaince agent` 仍是一轮工具调用。
 
-### 4.2 模型头太薄
+### 4.2 模型头太薄（按本档标准已补）
 
-`loop` 的 model 步是把因子日收益累成净值。RD-Agent 在训 LSTM/GRU/PTNN 并改超参。要到「联合进化」还差一个**可训练、可跳过**的预测头（线性 / LightGBM 即可），不是再堆一个 GRU 宣传点。
+`loop` 的 model 步已是**可训练、可跳过**的 OLS 线性头（lag-1/lag-2，样本不足诚实 `skipped`）。RD-Agent 训 LSTM/GRU/PTNN；LightGBM 头是可选升级，不是门槛。
 
-### 4.3 动作选择不读指标
+### 4.3 动作选择不读指标（已落地）
 
-现在是「上次 factor 下次 model」。RD-Agent 的 bandit 看上一轮组合指标再分配。应把 `portfolio_return` / skip_reason 喂进 `choose_next_action`。
+`choose_next_action` 已吃上一轮 `portfolio_return` / skip_reason：model 正收益续 model，跳过或非正回 factor。LLM 读整段历史是可选 advisor（`FINAINCE_LOOP_ADVISOR=1`），默认启发式且失败诚实降级。
 
-### 4.4 失败不会被下一轮检索
+### 4.4 失败不会被下一轮检索（已落地）
 
-isolate / eval 错误写进 trace，但 coder 不会查「同类 ImportError 最近 5 条」。轻量 CoSTEER（同 error 前缀检索）还没接上 `impl`。
+相似失败检索已落地（trace.recent_failures + SDK 工具 + playbook 纪律）。可选 bwrap/Docker 加固仍作为未来工作。
 
 ### 4.5 研报 `needs_impl` 还不会自动开沙箱
 
@@ -166,11 +166,15 @@ doctor / health 已报 isolator、qlib_child。
 
 ```text
 已做    A 因果 cite 链 · B 冻结 isolate · C 两步 loop · D 状态分类 · E doctor 字段
-下一步  C' 按组合指标选动作 + 可跳过的可训练头
-        B' 相似失败检索
-        D' needs_impl → 自动 isolate
-        A' 工作台画出 trace
-        E' 锁窗基准，不报论文 ARR
+        C' 组合指标选动作 + 可跳过线性头 · B' 相似失败检索（trace + SDK 工具 + playbook）
+        D' needs_impl 自动 isolate · A' 工作台画出 trace · E' 锁窗基准（local_panel，非论文 ARR）
+        过夜环：hypothesis 落 trace + JobRunner 异步 research_loop + 可选 LLM advisor
+        顶级差距收口（2026-08）：eval cost_bps 净值口径 + weak_ic(t≥3)/inflated_sharpe(DSR) 门禁
+        + 含成本锁窗 baseline · FINAINCE_PANEL_PATH 真宇宙面板注入 + doctor 面板报告
+        · coaching.research_context（CSS 低相关采样 + CoE 失败教训）入 advisor prompt 与 SDK 工具
+        · loop 表达式队列批量无人值守（CLI --expression / HTTP expressions）· model_head OLS/LightGBM 切换
+        · review/adversary 子进程 fresh-context 重评比对，approve(adversary=true) 默认关
+下一步  bwrap/Docker 沙箱加固 · 工作台 UI 呈现成本/门禁/对抗报告 · 真 CSI300 长窗对外数字（需数据轨凭据）
 ```
 
 **不做：**
@@ -188,3 +192,7 @@ doctor / health 已报 isolator、qlib_child。
 RD-Agent 证明了：**假设 → 隔离实现 → 反馈 → 再假设** 能把因子和模型一起推。FinAlpha 已经证明：**中文研报可以诚实复现，因子可以 fail-closed 晋升，研究员可以在一个同源台上做完**。
 
 下一阶段不是「成为微软的量化工厂」，而是把他们的 **Trace + 受控 coder + 联合目标** 接到我们已经会诚实结束的 desk 上。
+
+---
+
+> 全景竞品对比（AlphaAgent / FAMA / AlphaMemo / AgonAlpha / BRAIN 生态等 11 家）见 `docs/competitor-analysis.md`（2026-08-21），含收口状态与采纳/拒绝决策；后续执行方案见 `docs/improvement-plan-v3.md`，逐步实现记录见 `docs/CHANGELOG.md`。
