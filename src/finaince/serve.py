@@ -9,6 +9,41 @@ from fastapi import Request
 
 from finaince.settings import get_settings
 
+# Fail-safe desk auth: /api/v1 is token-gated by default except this
+# allowlist. Implemented as ASGI middleware (not a FastAPI dependency) so
+# websocket scopes and future HTTP routes cannot bypass it by omission.
+# Aiminer surfaces (/api/*) keep their own contract.
+_PUBLIC_V1_PATHS = frozenset({"/api/v1/health", "/api/v1/baseline"})
+
+
+class DeskAuthGate:
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        path = scope.get("path") or ""
+        if (
+            scope["type"] == "http"
+            and scope.get("method") != "OPTIONS"
+            and path.startswith("/api/v1/")
+            and path not in _PUBLIC_V1_PATHS
+        ):
+            from finaince.auth import desk_auth_ok
+
+            headers = {
+                k.decode("latin-1"): v.decode("latin-1")
+                for k, v in scope.get("headers") or []
+            }
+            if not desk_auth_ok(headers):
+                from starlette.responses import JSONResponse
+
+                response = JSONResponse(
+                    {"detail": "desk token required"}, status_code=401
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
 
 def resolve_workbench_dist() -> Path | None:
     """Locate the built workbench. Same CWD candidates as aiminer.api, plus absolute trees."""
@@ -117,7 +152,7 @@ def _attach_workbench_catchall(app: Any) -> None:
 
 
 def create_app() -> Any:
-    from fastapi import Depends, FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException
 
     settings = get_settings()
     settings.apply_engine_env()
@@ -128,25 +163,8 @@ def create_app() -> Any:
     desk_token = align_aiminer_auth_env()
     os.environ["AIMINER_INCLUDE_SPA"] = "1" if settings.serve_spa else "0"
 
-    # Fail-safe desk auth: /api/v1 is token-gated by default except this
-    # allowlist. Aiminer surfaces (/api/*) and the SPA keep their own contract.
-    _public_v1_paths = {"/api/v1/health", "/api/v1/baseline"}
-
-    def _require_desk(request: Request) -> None:
-        from finaince.auth import desk_auth_ok
-
-        if not request.url.path.startswith("/api/v1/"):
-            return
-        if request.url.path in _public_v1_paths:
-            return
-        if not desk_auth_ok(dict(request.headers)):
-            raise HTTPException(status_code=401, detail="desk token required")
-
-    app = FastAPI(
-        title=settings.product_name,
-        version="0.1.0",
-        dependencies=[Depends(_require_desk)],
-    )
+    app = FastAPI(title=settings.product_name, version="0.1.0")
+    app.add_middleware(DeskAuthGate)
     from fastapi.middleware.cors import CORSMiddleware
 
     app.add_middleware(
