@@ -117,7 +117,7 @@ def _attach_workbench_catchall(app: Any) -> None:
 
 
 def create_app() -> Any:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import Depends, FastAPI, HTTPException
 
     settings = get_settings()
     settings.apply_engine_env()
@@ -127,13 +127,26 @@ def create_app() -> Any:
 
     desk_token = align_aiminer_auth_env()
     os.environ["AIMINER_INCLUDE_SPA"] = "1" if settings.serve_spa else "0"
-    app = FastAPI(title=settings.product_name, version="0.1.0")
+
+    # Fail-safe desk auth: /api/v1 is token-gated by default except this
+    # allowlist. Aiminer surfaces (/api/*) and the SPA keep their own contract.
+    _public_v1_paths = {"/api/v1/health", "/api/v1/baseline"}
 
     def _require_desk(request: Request) -> None:
         from finaince.auth import desk_auth_ok
 
+        if not request.url.path.startswith("/api/v1/"):
+            return
+        if request.url.path in _public_v1_paths:
+            return
         if not desk_auth_ok(dict(request.headers)):
             raise HTTPException(status_code=401, detail="desk token required")
+
+    app = FastAPI(
+        title=settings.product_name,
+        version="0.1.0",
+        dependencies=[Depends(_require_desk)],
+    )
     from fastapi.middleware.cors import CORSMiddleware
 
     app.add_middleware(
@@ -168,7 +181,6 @@ def create_app() -> Any:
         query: str = "",
         style: str | None = None,
     ) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
 
         items = FactorCatalog().list(source=source, query=query, style=style)
@@ -176,7 +188,6 @@ def create_app() -> Any:
 
     @app.get("/api/v1/catalog/{catalog_id}")
     def catalog_detail(request: Request, catalog_id: str, embed: str | None = None) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
 
         rec = FactorCatalog().get(catalog_id)
@@ -191,7 +202,6 @@ def create_app() -> Any:
 
     @app.post("/api/v1/promote")
     def promote_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.review.desk import promote
 
         cid = str(body.get("catalog_id") or "")
@@ -204,7 +214,6 @@ def create_app() -> Any:
 
     @app.get("/api/v1/jobs/{job_id}")
     def job_detail(request: Request, job_id: str) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.jobs.runner import get_job
 
         row = get_job(job_id)
@@ -214,7 +223,6 @@ def create_app() -> Any:
 
     @app.get("/api/v1/audit")
     def audit_route(request: Request, action: str | None = None) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.catalog.audit import list_audit
 
         items = list_audit(action=action)
@@ -222,7 +230,6 @@ def create_app() -> Any:
 
     @app.get("/api/v1/jobs")
     def jobs(request: Request) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.jobs.runner import list_jobs
 
         rows = list_jobs()
@@ -230,7 +237,6 @@ def create_app() -> Any:
 
     @app.post("/api/v1/eval")
     def eval_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.eval.router import EvalRequest, evaluate
         from finaince.runtime import resolve_data_source
 
@@ -258,14 +264,12 @@ def create_app() -> Any:
 
     @app.get("/api/v1/review")
     def review_queue(request: Request) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
 
         return {"items": FactorCatalog().list_promotions("pending")}
 
     @app.get("/api/v1/review/{promotion_id}/gates")
     def review_gates(request: Request, promotion_id: str) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.catalog.store import FactorCatalog
         from finaince.review.gates import evaluate_gates
 
@@ -293,7 +297,6 @@ def create_app() -> Any:
     def review_approve(
         request: Request, promotion_id: str, body: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.review.desk import approve
 
         if (body or {}).get("override"):
@@ -306,21 +309,18 @@ def create_app() -> Any:
 
     @app.post("/api/v1/review/{promotion_id}/adversary")
     def review_adversary(request: Request, promotion_id: str) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.review.adversary import adversarial_review
 
         return adversarial_review(promotion_id)
 
     @app.post("/api/v1/review/{promotion_id}/reject")
     def review_reject(request: Request, promotion_id: str) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.review.desk import reject
 
         return reject(promotion_id)
 
     @app.post("/api/v1/reproduce")
     def reproduce_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.auth import pdf_path_allowed
         from finaince.jobs.runner import run_reproduce_job
 
@@ -334,14 +334,12 @@ def create_app() -> Any:
 
     @app.post("/api/v1/jobs/{job_id}/cancel")
     def cancel_job(request: Request, job_id: str) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.jobs.runner import cancel
 
         return cancel(job_id)
 
     @app.post("/api/v1/agent")
     def agent_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.agent import run_research_desk
 
         prompt = str(body.get("prompt") or "").strip()
@@ -351,7 +349,6 @@ def create_app() -> Any:
 
     @app.get("/api/v1/trace")
     def trace_route(request: Request, limit: int = 50) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.trace import list_chain
 
         items = list_chain(limit=limit)
@@ -372,14 +369,12 @@ def create_app() -> Any:
         oos_end: str = "2024-12-31",
         cost_bps: float = 5.0,
     ) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.data_track import run_bench
 
         return run_bench(is_start=is_start, is_end=is_end, oos_start=oos_start, oos_end=oos_end, cost_bps=cost_bps)
 
     @app.post("/api/v1/impl")
     def impl_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.jobs.runner import run_impl_job
 
         source = str(body.get("source") or "")
@@ -391,14 +386,12 @@ def create_app() -> Any:
 
     @app.post("/api/v1/impl/needs")
     def impl_needs_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.impl_status import fulfill_needs_impl
 
         return fulfill_needs_impl(body or {})
 
     @app.post("/api/v1/loop")
     def loop_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        _require_desk(request)
         from finaince.jobs.runner import run_loop_job
 
         steps = int((body or {}).get("steps") or 2)
