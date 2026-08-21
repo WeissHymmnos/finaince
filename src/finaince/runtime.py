@@ -9,7 +9,6 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-
 DEFAULT_LOCAL_DATA = Path.home() / "Documents" / "Data"
 OFFICIAL_DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 OFFICIAL_OPENAI_BASE = "https://api.openai.com/v1"
@@ -81,6 +80,30 @@ def packaged_local_panel() -> Path | None:
     return None
 
 
+def panel_path() -> Path:
+    raw = (os.getenv("FINAINCE_PANEL_PATH") or "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        parquet = path / "prices.parquet" if path.is_dir() else path
+        if not parquet.is_file():
+            raise ValueError(f"FINAINCE_PANEL_PATH does not exist or is not readable: {path}")
+        try:
+            import polars as pl
+            names = pl.scan_parquet(parquet).collect_schema().names()
+            if not (("ts_code" in names or "instrument" in names) and ("trade_date" in names or "datetime" in names)):
+                raise ValueError(f"FINAINCE_PANEL_PATH parquet missing core columns: {path}")
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError(f"FINAINCE_PANEL_PATH is not a valid readable parquet: {e}")
+        return path
+    
+    packed = packaged_local_panel()
+    if packed is not None:
+        return packed
+    return Path(__file__).resolve().parent / "data" / "local_panel"
+
+
 # aiminer.core.local_data._COLUMN_ALIASES + canonical names. trade_date/ts_code
 # are valid for repro_polars but not for the qlib child schema.
 _QLIB_DATETIME_NAMES = {"datetime", "date", "time", "timestamp"}
@@ -124,7 +147,10 @@ def qlib_local_data_path() -> Path | None:
     candidate = local_data_path()
     if local_panel_has_qlib_schema(candidate):
         return candidate
-    packed = packaged_local_panel()
+    try:
+        packed = panel_path()
+    except ValueError:
+        packed = packaged_local_panel()
     if local_panel_has_qlib_schema(packed):
         return packed
     return packed or candidate
@@ -137,7 +163,23 @@ def local_data_path() -> Path | None:
             return Path(raw).expanduser()
     if (DEFAULT_LOCAL_DATA / "prices.parquet").is_file():
         return DEFAULT_LOCAL_DATA
-    return packaged_local_panel()
+    try:
+        return panel_path()
+    except ValueError:
+        return packaged_local_panel()
+
+
+def raw_local_data_root() -> str:
+    """Canonical dual-read of the operator-configured local data root (no fallbacks).
+
+    Every module that needs "which directory did the operator point at" must
+    call this instead of re-implementing the two-key precedence.
+    """
+    for key in ("FINAINCE_LOCAL_DATA_PATH", "LOCAL_DATA_PATH"):
+        raw = (os.getenv(key) or "").strip()
+        if raw:
+            return raw
+    return ""
 
 
 def pdf_root() -> Path:
@@ -283,13 +325,13 @@ def resolve_data_source() -> str:
 _PANEL_STATS_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
 
 
-def local_panel_stats(path: Path | None = None) -> dict[str, Any]:
+def panel_stats(path: Path | None = None) -> dict[str, Any]:
     target = path or local_data_path()
     if target is None:
-        return {"n_assets": 0, "n_days": 0, "thin": True}
+        return {"n_assets": 0, "n_days": 0, "thin": True, "start": None, "end": None}
     parquet = target / "prices.parquet" if target.is_dir() else target
     if not parquet.is_file():
-        return {"n_assets": 0, "n_days": 0, "thin": True}
+        return {"n_assets": 0, "n_days": 0, "thin": True, "start": None, "end": None}
     try:
         st = parquet.stat()
         key = (str(parquet.resolve()), int(st.st_mtime_ns), int(st.st_size))
@@ -303,17 +345,46 @@ def local_panel_stats(path: Path | None = None) -> dict[str, Any]:
         code_col = "ts_code" if "ts_code" in names else "instrument"
         date_col = "trade_date" if "trade_date" in names else "datetime"
         if code_col not in names or date_col not in names:
-            stats = {"n_assets": 0, "n_days": 0, "thin": True}
+            stats = {"n_assets": 0, "n_days": 0, "thin": True, "start": None, "end": None}
         else:
             n_assets = int(lf.select(pl.col(code_col).n_unique()).collect().item() or 0)
             n_days = int(lf.select(pl.col(date_col).n_unique()).collect().item() or 0)
-            stats = {"n_assets": n_assets, "n_days": n_days, "thin": n_assets < 50 or n_days < 60}
+            
+            if n_days > 0:
+                df_dates = lf.select([pl.col(date_col).min().alias("start"), pl.col(date_col).max().alias("end")]).collect()
+                start_val = df_dates["start"][0]
+                end_val = df_dates["end"][0]
+                
+                if hasattr(start_val, "date"):
+                    start_val = start_val.date()
+                elif start_val is not None:
+                    start_val = date.fromisoformat(str(start_val)[:10])
+                    
+                if hasattr(end_val, "date"):
+                    end_val = end_val.date()
+                elif end_val is not None:
+                    end_val = date.fromisoformat(str(end_val)[:10])
+            else:
+                start_val = None
+                end_val = None
+                
+            stats = {
+                "n_assets": n_assets,
+                "n_days": n_days,
+                "thin": n_assets < 50 or n_days < 60,
+                "start": start_val.isoformat() if start_val else None,
+                "end": end_val.isoformat() if end_val else None,
+            }
         if len(_PANEL_STATS_CACHE) > 8:
             _PANEL_STATS_CACHE.clear()
         _PANEL_STATS_CACHE[key] = stats
         return dict(stats)
     except Exception:
-        return {"n_assets": 0, "n_days": 0, "thin": True}
+        return {"n_assets": 0, "n_days": 0, "thin": True, "start": None, "end": None}
+
+
+def local_panel_stats(path: Path | None = None) -> dict[str, Any]:
+    return panel_stats(path)
 
 
 def local_panel_is_thin(path: Path | None = None) -> bool:
