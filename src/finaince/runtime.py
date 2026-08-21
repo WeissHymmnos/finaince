@@ -22,6 +22,16 @@ _VENDOR_KEYS: tuple[tuple[str, tuple[str, ...], str, str, str], ...] = (
     ("kimi", ("MOONSHOT_API_KEY",), "", "kimi", "openai"),
     ("deepseek", ("DEEPSEEK_API_KEY", "Deepseek_KEY"), OFFICIAL_DEEPSEEK_BASE, "deepseek", "openai"),
 )
+
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "claude": "ClaudeCode_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "glm": "GLM_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+    "kimi": "MOONSHOT_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
 RQ_EVAL_START = date(2024, 1, 2)
 RQ_EVAL_END = date(2024, 3, 29)
 
@@ -460,7 +470,8 @@ def inject_llm_env(llm: dict[str, Any]) -> None:
     os.environ["LLM_API_KEY"] = key
     os.environ["FINAINCE_LLM_API_KEY"] = key
     provider = (llm.get("aiminer_provider") or "").strip().lower()
-    if provider == "deepseek":
-        os.environ["DEEPSEEK_API_KEY"] = key
+    vendor_env = PROVIDER_ENV_KEYS.get(provider)
+    if vendor_env:
+        os.environ[vendor_env] = key
     if llm.get("base_url"):
         os.environ["FINAINCE_LLM_BASE_URL"] = str(llm["base_url"])

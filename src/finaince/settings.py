@@ -178,16 +178,9 @@ def reproagent_runtime_settings():
 
 
 def inject_aiminer_api_key(provider: str, key: str) -> None:
-    mapping = {
-        "openai": "OpenAI_KEY",
-        "claude": "ClaudeCode_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "glm": "GLM_KEY",
-        "qwen": "DASHSCOPE_API_KEY",
-        "kimi": "MOONSHOT_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-    }
-    env = mapping.get((provider or "").lower())
+    from finaince.runtime import PROVIDER_ENV_KEYS
+
+    env = PROVIDER_ENV_KEYS.get((provider or "").lower())
     if env:
         os.environ.setdefault(env, key)
     os.environ.setdefault("LLM_API_KEY", key)
