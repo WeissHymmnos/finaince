@@ -1,8 +1,61 @@
-"""Named scorers: selection_score (pure) vs library_grade (backtest then 0-100)."""
+"""Named scorers (selection_score, library_grade) + the single source of return math.
+
+Sharpe / max-drawdown / equity curve / IC t-stat live here and ONLY here.
+Every module that reports performance numbers must import from this module so
+that the benchmark table, the promotion gates and the loop reward can never
+drift into different conventions.
+"""
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+TRADING_DAYS = 252.0
+
+
+def sharpe_ratio(values: list[float] | tuple[float, ...]) -> float | None:
+    """Annualized Sharpe of a daily return series; None when undefined (<20 obs or zero variance)."""
+    if len(values) < 20:
+        return None
+    mean = sum(values) / len(values)
+    var = sum((x - mean) ** 2 for x in values) / len(values)
+    std = math.sqrt(var) if var > 0 else None
+    if std is None:
+        return None
+    return mean * math.sqrt(TRADING_DAYS) / std
+
+
+def equity_curve(daily: dict[str, float]) -> dict[str, float]:
+    """Cumulative NAV keyed by the input's own keys, sorted; non-numeric values skipped."""
+    nav = 1.0
+    curve: dict[str, float] = {}
+    for key in sorted(daily):
+        try:
+            nav *= 1.0 + float(daily[key])
+        except (TypeError, ValueError):
+            continue
+        curve[str(key)] = round(nav, 6)
+    return curve
+
+
+def max_drawdown(values: list[float] | tuple[float, ...]) -> float:
+    """Most-negative peak-to-trough on the compounded series (<= 0.0 convention)."""
+    equity = 1.0
+    peak = 1.0
+    drawdown = 0.0
+    for value in values:
+        equity *= 1.0 + value
+        peak = max(peak, equity)
+        drawdown = min(drawdown, equity / peak - 1.0)
+    return drawdown
+
+
+def ic_t_stat(ic_ir: float | None, n_days: int | None) -> float | None:
+    """Harvey & Liu (2016) t-stat for IC: |ICIR| * sqrt(n_days)."""
+    if ic_ir is None or n_days is None or n_days <= 0:
+        return None
+    return ic_ir * math.sqrt(n_days)
 
 
 def selection_score(
@@ -27,7 +80,6 @@ def library_grade(
 ) -> dict[str, Any]:
     """0-100 + A/B/C/D. If expression is given, run the shipped FastMCP backtest path."""
     if expression:
-        from reproagent.mcp_server import build_mcp_server
 
         # Drive the real scoring via the same math as FastMCP without swapping semantics.
         from finaince.tools import run_library_grade_backtest
