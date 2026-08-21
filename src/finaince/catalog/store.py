@@ -113,7 +113,13 @@ class FactorCatalog:
             from finaince.expr_ast import expr_hash
 
             return expr_hash(record.expression.text, record.expression.dialect)
-        except Exception:
+        except Exception as exc:
+            try:
+                from finaince.obs import emit
+
+                emit("expr_hash_unavailable", error=str(exc)[:200])
+            except Exception:
+                pass
             return ""
 
     def find_by_expr_hash(self, expression: str, dialect: str) -> list[dict[str, Any]]:
@@ -122,7 +128,13 @@ class FactorCatalog:
             from finaince.expr_ast import expr_hash
 
             digest = expr_hash(expression, dialect)
-        except Exception:
+        except Exception as exc:
+            try:
+                from finaince.obs import emit
+
+                emit("expr_hash_unavailable", error=str(exc)[:200])
+            except Exception:
+                pass
             return []
         if not digest:
             return []

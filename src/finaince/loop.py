@@ -128,19 +128,34 @@ def advise_action(history: list[dict[str, Any]]) -> dict[str, Any]:
                         f"chain {chain['chain']}: head={chain.get('head')} tail={chain.get('tail')} "
                         f"best_rank_ic={chain.get('best_rank_ic')}\n"
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    from finaince.obs import emit
+
+                    emit("advisor_context_degraded", source="chains_display", error=str(exc)[:200])
+                except Exception:
+                    pass
             try:
                 from finaince.process_memory import context_block
 
                 block = context_block(limit=3)
                 if block:
                     prompt += block + "\n"
+            except Exception as exc:
+                try:
+                    from finaince.obs import emit
+
+                    emit("advisor_context_degraded", source="context_block", error=str(exc)[:200])
+                except Exception:
+                    pass
+            prompt += "\n"
+        except Exception as exc:
+            try:
+                from finaince.obs import emit
+
+                emit("advisor_context_degraded", source="lessons_section", error=str(exc)[:200])
             except Exception:
                 pass
-            prompt += "\n"
-        except Exception:
-            pass
 
         prompt += "History of last events:\n"
         for ev in history[-10:]:

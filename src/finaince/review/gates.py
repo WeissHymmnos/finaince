@@ -112,8 +112,13 @@ def _originality_corpus(exclude_id: str | None = None) -> list[tuple[str, str]]:
         if zoo.exists():
             data = json.loads(zoo.read_text())
             corpus.extend((s["id"], s["expr"]) for s in data.get("seeds", []))
-    except Exception:
-        pass
+    except Exception as exc:
+        try:
+            from finaince.obs import emit
+
+            emit("gate_corpus_degraded", source="seed_zoo", error=str(exc)[:200])
+        except Exception:
+            pass
     try:
         from finaince.catalog.store import FactorCatalog
 
@@ -122,8 +127,13 @@ def _originality_corpus(exclude_id: str | None = None) -> list[tuple[str, str]]:
                 continue
             if row.status in ("ready", "candidate", "review") and row.id:
                 corpus.append((row.id, row.expression.text))
-    except Exception:
-        pass
+    except Exception as exc:
+        try:
+            from finaince.obs import emit
+
+            emit("gate_corpus_degraded", source="catalog", error=str(exc)[:200])
+        except Exception:
+            pass
     return corpus
 
 
@@ -257,8 +267,14 @@ def evaluate_gates(
             from finaince.trace import list_chain
             events = list_chain(limit=500)
             n_trials = 1 + sum(1 for e in events if e.get("action", "").startswith(("eval", "isolated_impl")))
-        except Exception:
+        except Exception as exc:
             n_trials = 1
+            try:
+                from finaince.obs import emit
+
+                emit("trial_count_degraded", error=str(exc)[:200])
+            except Exception:
+                pass
             
         dsr = deflated_sharpe(returns, n_trials)
         if dsr is None:

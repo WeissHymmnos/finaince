@@ -40,7 +40,13 @@ def _seed_zoo_corpus() -> list[tuple[str, str]]:
             try:
                 data = json.loads(probe.read_text())
                 return [(s["id"], s["expr"]) for s in data.get("seeds", [])]
-            except Exception:
+            except Exception as exc:
+                try:
+                    from finaince.obs import emit
+
+                    emit("seed_zoo_degraded", error=str(exc)[:200])
+                except Exception:
+                    pass
                 return []
     return []
 
@@ -54,7 +60,13 @@ def structural_dedup(results_list: list[dict[str, Any]]) -> list[dict[str, Any]]
     """
     try:
         from finaince.expr_ast import max_similarity_vs
-    except Exception:
+    except Exception as exc:
+        try:
+            from finaince.obs import emit
+
+            emit("structural_dedup_disabled", error=str(exc)[:200])
+        except Exception:
+            pass
         return list(results_list)
 
     kept: list[dict[str, Any]] = []

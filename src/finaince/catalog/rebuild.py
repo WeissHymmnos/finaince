@@ -54,8 +54,14 @@ def rebuild(*, source: str | None = None) -> dict[str, Any]:
                         extras["daily_returns"] = serialize_equity_returns(eq)
                 accept_library_entry(entry, extras=extras, allow_incomplete=True)
                 counts["reproduction"] += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            counts["reproduction_errors"] = counts.get("reproduction_errors", 0) + 1
+            try:
+                from finaince.obs import emit
+
+                emit("rebuild_reproduction_failed", error=str(exc)[:300])
+            except Exception:
+                pass
     return {"ok": True, "counts": counts, "total": len(FactorCatalog().list())}
 
 
@@ -64,6 +70,7 @@ def retag_synthetic() -> dict[str, Any]:
     cat = FactorCatalog()
     tagged = 0
     skipped = 0
+    reports_error = ""
     for rec in cat.list():
         is_disc = rec.lineage.source == "discovery" or "source:discovery" in rec.tags
         if not is_disc:
@@ -108,11 +115,18 @@ def retag_synthetic() -> dict[str, Any]:
             report.validation_status = "synthetic"
             repo.save_report(report)
             reports += 1
-    except Exception:
-        pass
+    except Exception as exc:
+        reports_error = str(exc)[:300]
+        try:
+            from finaince.obs import emit
+
+            emit("retag_synthetic_failed", error=reports_error)
+        except Exception:
+            pass
     return {
         "ok": True,
         "catalog_tagged": tagged,
         "catalog_skipped": skipped,
         "reports_retagged": reports,
+        "reports_error": reports_error,
     }
