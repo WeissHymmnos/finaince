@@ -420,12 +420,7 @@ def _layered_long_short_cadence(
     return series, turnover_by_day
 
 
-def _candidate_fold_chunk(
-    payload: tuple[list[dict[str, Any]], dict[str, Any]]
-) -> list[dict[str, Any]]:
-    import polars as pl
-
-    specs, cfg = payload
+def _load_eval_context(cfg: dict[str, Any]) -> tuple[Any, dict[Any, set[str]], Any]:
     frame = read_years(
         date(int(cfg["first_year"]), 1, 1),
         date(int(cfg["last_year"]), 12, 31),
@@ -439,6 +434,25 @@ def _candidate_fold_chunk(
             universe_by_day_all[day] = set(members)
     forwards = _forward_returns(frame)
     panel = frame.sort(["ts_code", "trade_date"])
+    return panel, universe_by_day_all, forwards
+
+
+def _score_spec(panel: Any, spec: dict[str, Any]) -> Any:
+    import polars as pl
+
+    builder = TEMPLATES[spec["template"]][0]
+    raw_expr = builder(spec["field"], int(spec["window"]))
+    scored = panel.with_columns(raw_expr.alias("_raw")).with_columns(
+        pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+    )
+    return scored.select(["trade_date", "ts_code", "_score"])
+
+
+def _candidate_fold_chunk(
+    payload: tuple[list[dict[str, Any]], dict[str, Any]]
+) -> list[dict[str, Any]]:
+    specs, cfg = payload
+    panel, universe_by_day_all, forwards = _load_eval_context(cfg)
     years = range(int(cfg["start_year"]), int(cfg["end_year"]) + 1)
     cadence = max(1, int(cfg.get("rebalance_every", 1)))
 
@@ -465,6 +479,45 @@ def _candidate_fold_chunk(
         return round(mu, 6), round(sd, 6) if sd is not None else None
 
     rows: list[dict[str, Any]] = []
+
+    def _evaluate_scores(
+        scores: Any, row: dict[str, Any]
+    ) -> None:
+        fold_rows: list[dict[str, Any]] = []
+        for year in years:
+            scoped = _scoped_universe(
+                universe_by_day_all,
+                date(year, 1, 1),
+                date(year, 12, 31),
+                embargo=cfg["embargo"],
+            )
+            metrics = _fold_metrics(scores, scoped, cfg["cost_bps"])
+            if "insufficient_days" in metrics:
+                continue
+            fold_rows.append({"year": year, **metrics})
+        valid_rics = [f["rank_ic"] for f in fold_rows if f.get("rank_ic") is not None]
+        ric_mean, ric_std = _mean_std(valid_rics)
+        sharpe_vals = [
+            f["sharpe_net"] for f in fold_rows if f.get("sharpe_net") is not None
+        ]
+        sh_mean, sh_std = _mean_std(sharpe_vals)
+        row.update(
+            {
+                "folds": len(fold_rows),
+                "rank_ic_mean": ric_mean,
+                "rank_ic_std": ric_std,
+                "rank_ic_positive_ratio": (
+                    round(sum(1 for v in valid_rics if v > 0) / len(valid_rics), 4)
+                    if valid_rics
+                    else None
+                ),
+                "sharpe_net_mean": sh_mean,
+                "sharpe_net_std": sh_std,
+                "fold_detail": fold_rows,
+                "ok": True,
+            }
+        )
+
     for spec in specs:
         row: dict[str, Any] = {
             "name": spec["name"],
@@ -474,51 +527,103 @@ def _candidate_fold_chunk(
             "window": spec["window"],
         }
         try:
-            builder = TEMPLATES[spec["template"]][0]
-            raw_expr = builder(spec["field"], int(spec["window"]))
-            scored = panel.with_columns(raw_expr.alias("_raw")).with_columns(
-                pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
-            )
-            scores = scored.select(["trade_date", "ts_code", "_score"])
-            fold_rows: list[dict[str, Any]] = []
-            for year in years:
-                scoped = _scoped_universe(
-                    universe_by_day_all,
-                    date(year, 1, 1),
-                    date(year, 12, 31),
-                    embargo=cfg["embargo"],
-                )
-                metrics = _fold_metrics(scores, scoped, cfg["cost_bps"])
-                if "insufficient_days" in metrics:
-                    continue
-                fold_rows.append({"year": year, **metrics})
-            valid_rics = [f["rank_ic"] for f in fold_rows if f.get("rank_ic") is not None]
-            ric_mean, ric_std = _mean_std(valid_rics)
-            sharpe_vals = [
-                f["sharpe_net"] for f in fold_rows if f.get("sharpe_net") is not None
-            ]
-            sh_mean, sh_std = _mean_std(sharpe_vals)
-            row.update(
-                {
-                    "folds": len(fold_rows),
-                    "rank_ic_mean": ric_mean,
-                    "rank_ic_std": ric_std,
-                    "rank_ic_positive_ratio": (
-                        round(sum(1 for v in valid_rics if v > 0) / len(valid_rics), 4)
-                        if valid_rics
-                        else None
-                    ),
-                    "sharpe_net_mean": sh_mean,
-                    "sharpe_net_std": sh_std,
-                    "fold_detail": fold_rows,
-                    "ok": True,
-                }
-            )
+            _evaluate_scores(_score_spec(panel, spec), row)
         except Exception as exc:  # noqa: BLE001
             row["ok"] = False
             row["error"] = str(exc)[:200]
         rows.append(row)
     return rows
+
+
+def _combined_fold_row(
+    picked_specs: list[dict[str, Any]], cfg: dict[str, Any]
+) -> dict[str, Any]:
+    """Equal-weight rank mean of the globally ranked top specs, same folds."""
+    import polars as pl
+
+    combined_row: dict[str, Any] = {
+        "name": f"combined_top_{len(picked_specs)}",
+        "expression": "mean of cross-sectional ordinal ranks",
+        "template": "combined",
+        "field": "-",
+        "window": "-",
+        "members": [s["name"] for s in picked_specs],
+    }
+    try:
+        panel, universe_by_day_all, forwards = _load_eval_context(cfg)
+        acc = None
+        for spec in picked_specs:
+            sf = _score_spec(panel, spec)
+            acc = sf.rename({"_score": "_acc"}) if acc is None else (
+                acc.join(sf, on=["trade_date", "ts_code"], how="inner")
+                .with_columns((pl.col("_acc") + pl.col("_score")).alias("_acc"))
+                .drop("_score")
+            )
+        years = range(int(cfg["start_year"]), int(cfg["end_year"]) + 1)
+        cadence = max(1, int(cfg.get("rebalance_every", 1)))
+        combined = acc.with_columns(
+            (pl.col("_acc") / len(picked_specs)).alias("_raw")
+        ).with_columns(
+            pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+        )
+        scores = combined.select(["trade_date", "ts_code", "_score"])
+        fold_rows: list[dict[str, Any]] = []
+        for year in years:
+            scoped = _scoped_universe(
+                universe_by_day_all,
+                date(year, 1, 1),
+                date(year, 12, 31),
+                embargo=cfg["embargo"],
+            )
+            ic_vals = _daily_ic(scores, forwards, scoped, spearman=False)
+            rank_vals = _daily_ic(scores, forwards, scoped, spearman=True)
+            if cadence > 1:
+                ls, churn = _layered_long_short_cadence(
+                    scores, forwards, scoped, rebalance_every=cadence
+                )
+            else:
+                ls, churn = _layered_long_short(scores, forwards, scoped)
+            metrics = _metrics_from_artifacts(
+                {"ic_vals": ic_vals, "rank_vals": rank_vals, "ls": (ls, churn)},
+                cfg["cost_bps"],
+            )
+            if "insufficient_days" in metrics:
+                continue
+            fold_rows.append({"year": year, **metrics})
+
+        def _mean_std(vals: list[float]) -> tuple[float | None, float | None]:
+            if not vals:
+                return None, None
+            mu = sum(vals) / len(vals)
+            sd = math.sqrt(sum((v - mu) ** 2 for v in vals) / len(vals)) if len(vals) > 1 else None
+            return round(mu, 6), round(sd, 6) if sd is not None else None
+
+        valid_rics = [f["rank_ic"] for f in fold_rows if f.get("rank_ic") is not None]
+        ric_mean, ric_std = _mean_std(valid_rics)
+        sharpe_vals = [
+            f["sharpe_net"] for f in fold_rows if f.get("sharpe_net") is not None
+        ]
+        sh_mean, sh_std = _mean_std(sharpe_vals)
+        combined_row.update(
+            {
+                "folds": len(fold_rows),
+                "rank_ic_mean": ric_mean,
+                "rank_ic_std": ric_std,
+                "rank_ic_positive_ratio": (
+                    round(sum(1 for v in valid_rics if v > 0) / len(valid_rics), 4)
+                    if valid_rics
+                    else None
+                ),
+                "sharpe_net_mean": sh_mean,
+                "sharpe_net_std": sh_std,
+                "fold_detail": fold_rows,
+                "ok": True,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        combined_row["ok"] = False
+        combined_row["error"] = str(exc)[:200]
+    return combined_row
 
 
 def run_candidate_walkforward(
@@ -528,6 +633,7 @@ def run_candidate_walkforward(
     embargo: bool = True,
     workers: int = 1,
     rebalance_every: int = 1,
+    combine_top: int | None = None,
 ) -> dict[str, Any]:
     """Per-calendar-year folds over screening candidates on the bench PIT core.
 
@@ -537,11 +643,14 @@ def run_candidate_walkforward(
     citable claims still require run_bench + the full gate chain.
     ``rebalance_every > 1`` switches the LS legs to a held-legs cadence
     (screening-layer experiment; churn charged on refresh days only).
+    ``combine_top`` additionally evaluates the equal-weight mean of the top-N
+    candidates' cross-sectional ordinal ranks as one synthetic factor.
     """
     provenance: dict[str, Any] = {
         "cost_bps": cost_bps,
         "embargo_last_day": embargo,
         "rebalance_every": max(1, int(rebalance_every)),
+        "combine_top": int(combine_top) if combine_top else None,
         "candidates": len(specs),
         "universe_source": "point_in_time",
         "index_code": INDEX_CODE,
@@ -579,6 +688,7 @@ def run_candidate_walkforward(
         "start_year": first_year,
         "end_year": last_year,
         "rebalance_every": max(1, int(rebalance_every)),
+        "combine_top": int(combine_top) if combine_top else 0,
     }
 
     all_rows: list[dict[str, Any]] = []
@@ -599,6 +709,20 @@ def run_candidate_walkforward(
 
     ok_rows = [r for r in all_rows if r.get("ok")]
     failed = [r for r in all_rows if not r.get("ok")]
+
+    combine_n = int(combine_top) if combine_top else 0
+    if combine_n > 0:
+        picked = [
+            s for s in specs if s.get("template") in TEMPLATES
+        ][:combine_n]
+        if picked:
+            all_rows.append(_combined_fold_row(picked, cfg))
+            combined = all_rows[-1]
+            if combined.get("ok"):
+                ok_rows.append(combined)
+            else:
+                failed.append(combined)
+
     ranked = sorted(
         ok_rows,
         key=lambda r: r.get("rank_ic_mean") or float("-inf"),

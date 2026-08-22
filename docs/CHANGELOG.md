@@ -261,7 +261,9 @@ top-15 全为 compression 族（close/high/low × 窗口 5–60），十一折�
 
 **换手假说检验（同会话追加）**：新增 `_layered_long_short_cadence`（腿每 N 个交易日刷新、持仓日显式零换手条目、仅刷新日计费）+ `run_candidate_walkforward(rebalance_every=N)` + CLI `--rebalance-every`。对照结果：cadence 1→5→10 时 top-15 净 Sharpe 折均值从 −0.30~−0.51 升至 −0.21~−0.33 后不再改善（cadence 10 反而 −0.24~−0.41）。**「换手毒性是唯一死因」被证伪**——即使砍掉大部分成本拖累，毛收益量级本身不足以支撑独立五分位多空；rankIC 排序优势与经济量级是两回事。降频实验同时钉死：任何后续使用该信号的场合都应声明其独立不可交易性。
 
-测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）。
+**族内组合检验（同会话追加）**：新增 `combine_top` / CLI `--combine-top`——对全局排序 top-N 候选做截面名次等权合成（合成行走完全相同的逐年折叠核；组合在父进程确定性计算，修复多 worker 时每 chunk 各自合成的缺陷）。结果：combined_top_15 的 rankIC +0.0244±0.0262 对最佳单因子 +0.248——**族内合成无 IC 增益**（15 个成员同族同质，无分散可言）；但名次噪声互相抵消使日换手参与率从单因子 0.26–0.40 降到 **0.075–0.135（约 1/3）**；净 Sharpe 仍 −0.40。三重证据（十年持久 t≈3.4、降频不够、族内合成不加 alpha 只降换手）收敛为同一结论：**compression 族只配做调节特征，独立多空在任何已试构造下都不成立**。2019/2020 正 Sharpe 异象在合成行复现（+1.74/+2.13）——尾部行为驱动，与排序强弱解耦。
+
+测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）；combine_top 确定性契约测试后 278→279（N=1 合成行必须逐折等于成员行）。
 
 测试基线：274→276（top_specs fail-closed 排序契约 + candidate walkforward hermetic 全链路含失败行记账）；追加换手假说检验后 276→278。
 

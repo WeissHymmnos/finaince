@@ -469,3 +469,31 @@ def test_candidate_walkforward_rebalance_cadence_hermetic(isolated_home):
     daily_t = [f["turnover"] for f in daily_row["fold_detail"]]
     weekly_t = [f["turnover"] for f in weekly_row["fold_detail"]]
     assert sum(weekly_t) <= sum(daily_t)
+
+
+def test_candidate_walkforward_combine_top(isolated_home):
+    from finaince import sweep as sweep_mod
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    grid = {c["name"]: c for c in sweep_mod.build_grid(windows=(5,))}
+    specs = [grid["mom_close_5"], grid["compression_close_5"]]
+
+    single = sweep_mod.run_candidate_walkforward(specs=specs, combine_top=1)
+    assert single["provenance"]["combine_top"] == 1
+    combined_one = next(r for r in single["rows"] if r["name"] == "combined_top_1")
+    assert combined_one["ok"] is True, combined_one.get("error")
+    assert combined_one["members"] == ["mom_close_5"]
+    member = next(r for r in single["rows"] if r["name"] == "mom_close_5")
+    for f_c, f_m in zip(combined_one["fold_detail"], member["fold_detail"]):
+        assert f_c["year"] == f_m["year"]
+        assert f_c["rank_ic"] == pytest.approx(f_m["rank_ic"], abs=1e-9)
+
+    both = sweep_mod.run_candidate_walkforward(specs=specs, combine_top=2)
+    combined_two = next(r for r in both["rows"] if r["name"] == "combined_top_2")
+    assert combined_two["ok"] is True, combined_two.get("error")
+    assert combined_two["folds"] >= 4
+    assert combined_two["rank_ic_positive_ratio"] is not None
+
+    none_opt = sweep_mod.run_candidate_walkforward(specs=specs)
+    assert all(not r["name"].startswith("combined") for r in none_opt["rows"])
+    assert none_opt["provenance"]["combine_top"] is None
