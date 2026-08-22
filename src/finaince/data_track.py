@@ -182,7 +182,23 @@ def _require_rq():
         import rqdatac
     except ImportError as exc:
         raise RuntimeError(f"rqdatac unavailable: {exc}") from exc
+    user = (os.environ.get("RQ_USER") or "").strip()
+    password = (os.environ.get("RQ_PASS") or "").strip()
+    try:
+        rqdatac.init(user, password)
+    except Exception as exc:
+        raise RuntimeError(f"rq auth failed: {exc}") from exc
     return rqdatac
+
+
+def _flatten_components(raw: Any) -> list[str]:
+    """index_components returns {date: [ids]} over ranges; union across dates."""
+    if isinstance(raw, dict):
+        ids: set[str] = set()
+        for day_ids in raw.values():
+            ids.update(str(x) for x in day_ids)
+        return sorted(ids)
+    return sorted({str(x) for x in raw})
 
 
 def fetch_year_live(year: int) -> Path:
@@ -193,13 +209,15 @@ def fetch_year_live(year: int) -> Path:
 
     start = date(year, 1, 1)
     end = min(date(year, 12, 31), date.today())
-    order_book_ids = rq.index_components(INDEX_CODE, start_date=start, end_date=end)
+    order_book_ids = _flatten_components(
+        rq.index_components(INDEX_CODE, start_date=start, end_date=end)
+    )
     frame = rq.get_price(
-        list(order_book_ids),
+        order_book_ids,
         start_date=start,
         end_date=end,
         frequency="1d",
-        fields=["open", "high", "low", "close", "volume", "amount"],
+        fields=["open", "high", "low", "close", "volume", "total_turnover"],
         adjust_type="pre",
         expect_df=True,
     )
@@ -211,6 +229,8 @@ def fetch_year_live(year: int) -> Path:
             rename[column] = "ts_code"
         if "date" in lowered or "trading" in lowered:
             rename[column] = "trade_date"
+        if "turnover" in lowered:
+            rename[column] = "amount"
     pdf = pdf.rename(columns=rename)
     if "trade_date" not in pdf.columns or "ts_code" not in pdf.columns:
         raise ValueError(f"unexpected rq frame columns: {list(pdf.columns)}")
@@ -224,8 +244,8 @@ def fetch_year_live(year: int) -> Path:
 
 def fetch_components_live(asof: date) -> Path:
     rq = _require_rq()
-    ids = rq.index_components(INDEX_CODE, start_date=asof, end_date=asof)
-    return write_components(asof, [str(x) for x in ids])
+    raw = rq.index_components(INDEX_CODE, start_date=asof, end_date=asof)
+    return write_components(asof, _flatten_components(raw))
 
 
 def sync_cache(start_year: int, end_year: int) -> dict[str, Any]:
@@ -292,8 +312,9 @@ def _daily_ic(scores: Any, forwards: Any, universe_by_day: dict[Any, set[str]], 
     ics: list[float] = []
     for day, group in joined.group_by("trade_date"):
         members = universe_by_day.get(day[0])
-        if members is not None:
-            group = group.filter(group["ts_code"].is_in(sorted(members)))
+        if members is None:
+            continue
+        group = group.filter(group["ts_code"].is_in(sorted(members)))
         if group.height < 10:
             continue
         x = group["_score"]
@@ -323,15 +344,16 @@ def _layered_long_short(
     participation proxy, not dollar turnover; declared as such in provenance.
     """
     joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
-    days = sorted(set(joined["trade_date"].to_list()))
+    days = sorted(
+        d for d in set(joined["trade_date"].to_list()) if d in universe_by_day
+    )
     series: list[tuple[Any, float]] = []
     prev_members: tuple[set[str], set[str]] | None = None
     turnover_by_day: dict[Any, float] = {}
     for day in days:
+        members = universe_by_day[day]
         group = joined.filter(joined["trade_date"] == day)
-        members = universe_by_day.get(day)
-        if members is not None:
-            group = group.filter(group["ts_code"].is_in(sorted(members)))
+        group = group.filter(group["ts_code"].is_in(sorted(members)))
         need = n_groups * 4
         if group.height < need:
             if prev_members is not None:

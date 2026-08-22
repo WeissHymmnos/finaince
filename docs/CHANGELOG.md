@@ -202,6 +202,30 @@
 
 ---
 
+## 会话八：M1* 达成——首批可引用 CSI300 双窗数字
+
+**凭据接入与 live 路径修复**（用户供给米筐账号；hermetic 测试从未覆盖的真实 API 形状暴露三处缺陷，全部修复）
+- `rqdatac.init()` 此前缺失：`_require_rq` 现以 RQ_USER/RQ_PASS 显式认证，失败 fail-closed。
+- `index_components` 区间返回 `{date: [ids]}` 字典而非扁平列表：新增 `_flatten_components` 按日期并集摊平；`fetch_components_live` 同修（原实现会把 datetime 键写进成分快照）。
+- 价格字段名：rqdatac 用 `total_turnover`，映射为面板 `amount` 列。
+- **窗口泄漏（P0 级）**：`_daily_ic` 与 `_layered_long_short` 遍历全样本日期，窗口外日期以未过滤截面混入两窗统计——OOS 指标实际是全样本数。修复后严格按 `universe_by_day` 边界裁剪；回归测试钉死 20 日序列在半窗下只产 10 日。
+
+**同步结果**：2019–2024 六年 CSI300 日线缓存（sha256 manifest）+ 12 个再平衡日成分快照全部落地；doctor `data_track` 全绿。
+
+**M1\* 首表**（IS 2019-01-01→2023-12-31 / OOS 2024-01-01→2024-12-31，5 bps 双边计入五分位 LS 换手；universe=point-in-time csi300 v1；种子因子是管线验证器，非 alpha 主张）
+
+| factor | IS days/OOS days | IS IC | OOS IC | IS rank_ic | OOS rank_ic | IS sharpe_net | OOS sharpe_net |
+|---|---|---|---|---|---|---|---|
+| rank_delta_20 | 1107/241 | 0.0038 | 0.0113 | -0.0086 | 0.0043 | -0.41 | -0.99 |
+| reversal_5 | 1107/241 | -0.0008 | -0.0125 | 0.0150 | -0.0038 | -0.62 | +0.54 |
+| vp_shock | 1107/241 | -0.0009 | -0.0016 | -0.0163 | -0.0117 | -1.00 | -0.95 |
+
+诚实结论：种子因子无超额（预期内）；reversal_5 的 OOS/IS 反号正是真实市场不稳定的样貌——这组数字的价值在于**管线可信**（point-in-time 成分、逐日换手扣费、双窗隔离），后续治理内存活因子的对照基线由此建立。对竞品判据的追赶从下一批 LLM 生成因子开始。
+
+测试基线：269→270。
+
+---
+
 ## 关键不变量（全程遵守）
 
 1. 默认行为零破坏：每个工作单元落地时既有测试全绿（136→146→169→178 单调递增）。

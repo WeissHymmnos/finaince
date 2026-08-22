@@ -70,6 +70,8 @@ Two consecutive runs must agree on `ok` and the reported IC/Sharpe. When you quo
 
 To evaluate on a full universe instead of the shipped smoke fixture, set `FINAINCE_PANEL_PATH` to a parquet file matching the `prices.parquet` schema (`trade_date`, `ts_code`, `close`, etc.). Alternatively, providing RiceQuant credentials (`RQ_USER` and `RQ_PASS`) unlocks `data_backend=ricequant`. All promoted numbers should explicitly quote the cost (e.g., `cost_bps`), the universe, and the backtest window to ensure comparability.
 
+The true-universe track has run: `finaince bench --sync` downloaded the point-in-time CSI300 cache (2019–2024, sha256 manifests, 12 rebalance-date constituent snapshots) and produced the first citable dual-window table (IS 2019→2023 / OOS 2024, 5 bps double-sided). The seed factors are plumbing validators, not alpha: e.g. `rank_delta_20` IS IC +0.0038 / OOS IC +0.0113 with negative net Sharpe both windows; `reversal_5` flips sign OOS (+0.54 vs −0.62 net Sharpe) — reported as-is. Reproduce with `finaince bench`; provenance (windows, cost, universe, data version) ships inside the JSON output.
+
 ## Features
 
 - Catalog → eval → fail-closed promote/review on one desk

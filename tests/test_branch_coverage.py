@@ -274,3 +274,41 @@ def compute(panel):
     return [open('x') for _ in close]
 """
 
+
+
+def test_bench_window_scoping_excludes_out_of_window_days() -> None:
+    import polars as pl
+
+    from finaince.data_track import _daily_ic, _layered_long_short
+
+    dates = [f"2024-01-{d:02d}" for d in range(1, 21)]
+    rows = []
+    for di, day in enumerate(dates):
+        for i in range(25):
+            code = f"{i:06d}.XSHE"
+            rows.append(
+                {
+                    "trade_date": day,
+                    "ts_code": code,
+                    "_score": float(i) + di * 0.01,
+                    "_fwd_ret": 0.001 * ((i % 5) - 2),
+                }
+            )
+    joined = pl.DataFrame(rows)
+
+    def universe(days: list[str]) -> dict[str, set[str]]:
+        return {d: {f"{i:06d}.XSHE" for i in range(25)} for d in days}
+
+    full = universe(dates)
+    first_half = universe(dates[:10])
+
+    ls_full, _ = _layered_long_short(joined.select("trade_date", "ts_code", "_score"), joined.select("trade_date", "ts_code", "_fwd_ret"), full)
+    ls_half, _ = _layered_long_short(joined.select("trade_date", "ts_code", "_score"), joined.select("trade_date", "ts_code", "_fwd_ret"), first_half)
+    assert len(ls_full) == 20
+    assert len(ls_half) == 10
+    assert [d for d, _ in ls_half] == dates[:10]
+
+    ic_full = _daily_ic(joined.select("trade_date", "ts_code", "_score"), joined.select("trade_date", "ts_code", "_fwd_ret"), full, spearman=False)
+    ic_half = _daily_ic(joined.select("trade_date", "ts_code", "_score"), joined.select("trade_date", "ts_code", "_fwd_ret"), first_half, spearman=False)
+    assert len(ic_full) == 20
+    assert len(ic_half) == 10

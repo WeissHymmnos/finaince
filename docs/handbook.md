@@ -223,7 +223,7 @@ finaince --help
 | `jobs [--cancel ID]` | 作业列表 / 取消 |
 | `trace [--limit N]` | 研究事件链（每条带 hypothesis） |
 | `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 因子/模型交替环，支持表达式队列批量；模型步自动尝试跨 ready 因子动态组合（WS-I）；`--workers N`（1–8）对队列做进程级并行预评估 |
-| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps）；`--sync` 需米筐凭据先抓缓存 |
+| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps）；`--sync` 需米筐凭据先抓缓存。已跑通的首表（2026-08）：rank_delta_20 IS IC +0.0038 / OOS +0.0113；reversal_5 OOS 净 Sharpe +0.54 对 IS −0.62 反号照实报；种子因子为管线验证器非 alpha 主张 |
 | `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
 | `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
 | `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |
