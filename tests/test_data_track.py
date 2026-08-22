@@ -293,6 +293,10 @@ def test_sweep_grid_and_hermetic_run(isolated_home):
     assert len(names) == len(set(names))
     assert any(c["template"] == "compression" for c in grid)
     assert all(c["field"] != "amount" or c["template"] != "compression" for c in grid)
+    stoch_fields = [c["field"] for c in grid if c["template"] == "stoch"]
+    assert stoch_fields == ["close"]
+    vwap_fields = {c["field"] for c in grid if c["template"] == "vwapdev"}
+    assert vwap_fields == {"close", "high", "low"}
 
     _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
     result = sweep_mod.run_sweep(windows=(5,), top=5)

@@ -267,7 +267,9 @@ top-15 全为 compression 族（close/high/low × 窗口 5–60），十一折�
 
 **自适应加权组合（同会话追加）**：`combine_weighting=adaptive_inv_vol` / CLI `--combine-weighting`——每一年份的成员权重只用该年**之前**折的 rankIC（sign×逆离散度，不足两年观测回退中性等权），构造上无前视；合成行暴露 `weights_by_year` 审计轨迹（归一化 Σ|w|=1）。十二族预算对照：equal −0.010（27% 折正）→ adaptive **+0.0098（82% 折正）**——符号对齐把负族翻成反向使用，权重漂移表清晰可见 compression/rev 持续正权、zma/mom/shock/ma_dist 持续负权。诚实结论：自适应加权修复符号问题但不无中生有——远低于精选两信号的 +0.031；**选择强于修正**，弱成员即使翻转也稀释组合。adaptive 模式的正确用途是「哪些族真带信号」的诊断器，而非收益修复器。
 
-测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）；combine_top 确定性契约测试后 278→279（N=1 合成行必须逐折等于成员行）；per_family 断言并入既有 top_specs 契约测试，基线维持 279；adaptive 契约测试后 279→280（N=1 自适应恒等、前两年中性、Σ|w|=1、无效模式 fail-closed）。
+**模板动物园扩充（同会话追加）**：新增三族 `stoch`（区间位置 %K）、`vratio`（短长波动比）、`vwapdev`（close 对滚动 VWAP 偏离），配 `FAMILY_FIELDS` 按族约束字段（stoch 仅 close、vwapdev 价格类字段）避免无意义笛卡尔积；网格 145→175。逐族裁决：(1) vratio 弱正（+0.006、64% 折正）；(2) stoch 负（−0.02、27%）；(3) **vwapdev 是全网格最稳定的反向结构——rankIC −0.026~−0.030 ±0.010，11 折全负（0% 正）**：close 高于滚动 VWAP 十一年如一日预测跑输，翻转读数 t≈8+，但任何当下引用其翻转都必须声明「全样本知符号」的前视属性，合法用途是自适应组合中由历史折定负权。combined_top_4_adaptive（compression×2+rev×2，5 日调仓）：rankIC +0.030±0.016、100% 折正——与精选二信号组合同级，四成员分散未再增益亦未受损。
+
+测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）；combine_top 确定性契约测试后 278→279（N=1 合成行必须逐折等于成员行）；per_family 断言并入既有 top_specs 契约测试，基线维持 279；adaptive 契约测试后 279→280（N=1 自适应恒等、前两年中性、Σ|w|=1、无效模式 fail-closed）；模板族字段约束断言并入既有 sweep grid 测试，基线维持 280。
 
 测试基线：274→276（top_specs fail-closed 排序契约 + candidate walkforward hermetic 全链路含失败行记账）；追加换手假说检验后 276→278。
 

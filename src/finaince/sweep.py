@@ -74,6 +74,31 @@ def _compression(f: str, w: int) -> Any:
     )
 
 
+def _stoch(f: str, w: int) -> Any:
+    import polars as pl
+
+    lo = pl.col("low").rolling_min(w).over("ts_code")
+    hi = pl.col("high").rolling_max(w).over("ts_code")
+    return (pl.col(f) - lo) / (hi - lo + _EPS)
+
+
+def _vratio(f: str, w: int) -> Any:
+    import polars as pl
+
+    return pl.col(f).shift(1).rolling_std(5).over("ts_code") / (
+        pl.col(f).shift(1).rolling_std(w).over("ts_code") + _EPS
+    )
+
+
+def _vwapdev(f: str, w: int) -> Any:
+    import polars as pl
+
+    rvwap = pl.col("amount").rolling_sum(w).over("ts_code") / (
+        pl.col("volume").rolling_sum(w).over("ts_code") + _EPS
+    )
+    return pl.col(f) / (rvwap + _EPS)
+
+
 TEMPLATES: dict[str, tuple[Callable[[str, int], Any], Callable[[str, int], str]]] = {
     "mom": (_mom, lambda f, w: f"Rank(Delta({f}, {w}))"),
     "rev": (lambda f, w: -_mom(f, w), lambda f, w: f"-Rank(Delta({f}, {w}))"),
@@ -84,6 +109,24 @@ TEMPLATES: dict[str, tuple[Callable[[str, int], Any], Callable[[str, int], str]]
         _compression,
         lambda f, w: f"-Rank(Max({f}, {w}) - Min({f}, {w}))",
     ),
+    "stoch": (
+        _stoch,
+        lambda f, w: f"Rank((({f}) - Min(low, {w})) / (Max(high, {w}) - Min(low, {w})))",
+    ),
+    "vratio": (
+        _vratio,
+        lambda f, w: f"Rank(Div(Std({f}, 5), Std({f}, {w})))",
+    ),
+    "vwapdev": (
+        _vwapdev,
+        lambda f, w: f"Rank(Div({f}, Div(Sum(amount, {w}), Sum(volume, {w}))))",
+    ),
+}
+
+FAMILY_FIELDS: dict[str, tuple[str, ...]] = {
+    "stoch": ("close",),
+    "vratio": ("close", "volume"),
+    "vwapdev": ("close", "high", "low"),
 }
 
 
@@ -92,7 +135,8 @@ def build_grid(
 ) -> list[dict[str, Any]]:
     grid: list[dict[str, Any]] = []
     for tname, (_builder, text_fn) in TEMPLATES.items():
-        for field in fields:
+        family_fields = FAMILY_FIELDS.get(tname, fields)
+        for field in family_fields:
             if tname == "compression" and field == "amount":
                 continue
             for window in windows:
