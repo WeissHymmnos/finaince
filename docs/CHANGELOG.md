@@ -226,6 +226,25 @@
 
 ---
 
+## 会话九：发现力引擎——历史延长、严谨性包、筛选地图
+
+**#5 历史延长**：缓存 2019 起 → **2014–2024 共 11 年**；扩展窗 IS(2014–2023) 2326 个交易日。米筐数据源在 2016-06-10 无成分快照（重试确认非瞬时故障）——新增 `component_gaps()` 把此类缺口写入 provenance 与 doctor，桥接行为可见而非静默。
+
+**#4 严谨性包**
+- **Embargo（默认开启）**：每窗最后一个交易日的 forward return 跨界引用下一窗收盘价——`_scoped_universe` 现默认剔除该日（`--no-embargo` 可关）。M1\* 数字因此移动 ≤1 天，provenance 记录 `embargo_last_day`。
+- **成本敏感度曲线**：`bench --cost-sweep 0,5,10,20`。重构为「原始序列算一次、多成本廉价后处理」。首批读数直接暴露换手毒性：reversal_5 IS 净 Sharpe 在 0bps 为 +0.02、5bps 后 −0.86。
+- **Walk-forward 十折**：新命令 `finaince walkforward`，逐年折叠报 IC mean±std 与正折比例。首批读数：reversal_5 rankIC **+0.040±0.028、90% 折为正**——十个种子中唯一跨十年稳定的信号。
+- **池中性化**：`--neutralize-vs <种子名列表>` 对控制集做逐日截面 OLS 残差化。reversal_5 残差后仍 +0.035/90% 正折——其信号不能被其余种子解释。
+
+**#3 筛选地图**：新模块 `sweep.py` + 命令 `finaince sweep`。6 类模板（mom/rev/ma_dist/zma/shock/compression）× 字段 × 窗口的网格直编 polars 表达式，**复用 bench 的 PIT 评估核**（同宇宙、同换手模型、同成本口径，数字与基准表直接可比）；spawn 进程池并行（8 workers 145 候选 112 秒完成，顺序版 >10 分钟超时）；JSON+MD 工件落盘 cache/sweep/。
+- 首批地图发现：**compression 族（滚动高低幅宽取负）霸榜 OOS 前 15**——OOS IC ≈0.036 / rank_ic ≈0.06，但 IS≈0 的极端不对称。按纪律标注为**待查信号而非主张**（候选解释：2024 年微盘崩塌后的低波动反转机制），下一步用逐年折叠定位信号出现时点。
+- bring-up 过程修复：read_years int/date 混传、中性化 join 未 drop_nulls 致 SVD 不收敛、年份目录 glob 错配、cfg 缺 first_year 键。
+- 夹具升级：hermetic 成分快照从只覆盖 2023 起改为覆盖全部种子年份（此前 hermetic bench 的 IS 实际只有半年数据）。
+
+测试基线：270→274。
+
+---
+
 ## 关键不变量（全程遵守）
 
 1. 默认行为零破坏：每个工作单元落地时既有测试全绿（136→146→169→178 单调递增）。

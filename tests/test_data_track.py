@@ -121,7 +121,7 @@ def _seed_cache(home, years=(2023, 2024), n_assets=40):
                     )
             day = d.fromordinal(day.toordinal() + 1)
         write_year_frame(year, pl.DataFrame(rows))
-    for rb in rebalance_dates(d(2023, 1, 1), d(2024, 12, 31)):
+    for rb in rebalance_dates(d(years[0], 1, 1), d(years[-1], 12, 31)):
         write_components(rb, codes[:30] if rb.month == 6 else codes[10:])
     write_manifest()
     return track_root()
@@ -229,3 +229,76 @@ def test_live_fetch_refused_without_credentials(monkeypatch, isolated_home):
     monkeypatch.delenv("RQ_PASS", raising=False)
     with _pytest.raises(RuntimeError, match="RQ credentials missing"):
         fetch_year_live(2024)
+
+
+def test_bench_cost_curve_and_embargo_provenance(isolated_home):
+    from finaince.data_track import run_bench
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    result = run_bench(
+        is_start="2019-01-01",
+        is_end="2023-12-31",
+        oos_start="2024-01-01",
+        oos_end="2024-12-31",
+        cost_bps=5.0,
+        costs=[0.0, 5.0, 10.0],
+    )
+    assert result["ok"] is True
+    curve = result.get("cost_curve") or []
+    assert {e["cost_bps"] for e in curve} == {0.0, 5.0, 10.0}
+    assert len(curve) == 9
+    assert result["provenance"]["embargo_last_day"] is True
+
+
+def test_scoped_universe_embargo_drops_last_day():
+    from datetime import date as d
+
+    from finaince.data_track import _scoped_universe
+
+    days = [d(2024, 1, i) for i in range(2, 11)]
+    universe = {day: {"a", "b"} for day in days}
+    plain = _scoped_universe(universe, days[0], days[-1], embargo=False)
+    guarded = _scoped_universe(universe, days[0], days[-1], embargo=True)
+    assert max(plain) == days[-1]
+    assert max(guarded) == days[-2]
+
+
+def test_walkforward_hermetic(isolated_home):
+    from finaince.data_track import run_walkforward
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    result = run_walkforward(start="2019-01-01", end="2023-12-31")
+    assert result["ok"] is True, result.get("error")
+    assert len(result["rows"]) == 3
+    for row in result["rows"]:
+        assert row["folds"] >= 4
+        assert row["rank_ic_positive_ratio"] is not None
+
+    neutralized = run_walkforward(
+        start="2019-01-01",
+        end="2023-12-31",
+        neutralize_vs=["reversal_5"],
+    )
+    assert neutralized["ok"] is True
+
+    bad = run_walkforward(neutralize_vs=["not_a_seed"])
+    assert bad["ok"] is False
+
+
+def test_sweep_grid_and_hermetic_run(isolated_home):
+    from finaince import sweep as sweep_mod
+
+    grid = sweep_mod.build_grid(windows=(5,))
+    names = [c["name"] for c in grid]
+    assert len(names) == len(set(names))
+    assert any(c["template"] == "compression" for c in grid)
+    assert all(c["field"] != "amount" or c["template"] != "compression" for c in grid)
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    result = sweep_mod.run_sweep(windows=(5,), top=5)
+    assert result["ok"] is True, result.get("error")
+    assert result["evaluated"] == len(grid)
+    assert len(result["top"]) == min(5, result["evaluated"])
+    from pathlib import Path
+
+    assert Path(result["artifact"]).exists()

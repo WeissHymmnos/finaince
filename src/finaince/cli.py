@@ -506,6 +506,21 @@ def bench_cmd(
     ),
     start_year: int = typer.Option(2019, "--start-year", help="--sync: first price year to fetch"),
     end_year: int = typer.Option(2024, "--end-year", help="--sync: last price year to fetch"),
+    cost_sweep: str = typer.Option(
+        "",
+        "--cost-sweep",
+        help="Comma cost list for a sensitivity curve, e.g. 0,5,10,20",
+    ),
+    embargo_last_day: bool = typer.Option(
+        True,
+        "--embargo-last-day/--no-embargo",
+        help="Drop each window's final day so its forward return cannot cross the boundary",
+    ),
+    neutralize_vs: str = typer.Option(
+        "",
+        "--neutralize-vs",
+        help="Comma-separated seed names to residualize each factor against",
+    ),
 ) -> None:
     """WS-D citable CSI300 double-window benchmark over the point-in-time cache."""
     from finaince.data_track import run_bench, sync_cache
@@ -515,12 +530,78 @@ def bench_cmd(
         if not outcome.get("ok"):
             typer.echo(json.dumps(outcome, ensure_ascii=False, indent=2), err=True)
             raise typer.Exit(code=1)
+
+    def _floats(raw: str) -> list[float]:
+        return [float(x.strip()) for x in raw.split(",") if x.strip()]
+
+    try:
+        costs = _floats(cost_sweep) or None
+        controls = [x.strip() for x in neutralize_vs.split(",") if x.strip()] or None
+    except ValueError as exc:
+        typer.echo(json.dumps({"ok": False, "error": f"bad list input: {exc}"}, indent=2), err=True)
+        raise typer.Exit(code=1) from None
+
     result = run_bench(
         is_start=is_start,
         is_end=is_end,
         oos_start=oos_start,
         oos_end=oos_end,
         cost_bps=cost_bps,
+        costs=costs,
+        embargo=embargo_last_day,
+        neutralize_vs=controls,
+    )
+    typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
+    if not result.get("ok"):
+        raise typer.Exit(code=1)
+
+
+@app.command("walkforward")
+def walkforward_cmd(
+    start: str = typer.Option("2019-01-01", "--start", help="First fold year via --start YYYY-MM-DD"),
+    end: str = typer.Option("2023-12-31", "--end"),
+    cost_bps: float = typer.Option(5.0, "--cost-bps"),
+    embargo_last_day: bool = typer.Option(True, "--embargo-last-day/--no-embargo"),
+    neutralize_vs: str = typer.Option("", "--neutralize-vs", help="Seed names to residualize against"),
+) -> None:
+    """Per-calendar-year fold robustness: IC mean/std and positive-fold ratio."""
+    from finaince.data_track import run_walkforward
+
+    controls = [x.strip() for x in neutralize_vs.split(",") if x.strip()] or None
+    result = run_walkforward(
+        start=start,
+        end=end,
+        cost_bps=cost_bps,
+        embargo=embargo_last_day,
+        neutralize_vs=controls,
+    )
+    typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
+    if not result.get("ok"):
+        raise typer.Exit(code=1)
+
+
+@app.command("sweep")
+def sweep_cmd(
+    top: int = typer.Option(20, "--top"),
+    workers: int = typer.Option(1, "--workers", min=1, max=8),
+    rank_by: str = typer.Option("oos_rank_ic", "--rank-by", help="oos_rank_ic|oos_icir|oos_sharpe_net|is_ic|..."),
+    windows: str = typer.Option("5,10,20,40,60", "--windows"),
+    cost_bps: float = typer.Option(5.0, "--cost-bps"),
+    no_embargo: bool = typer.Option(False, "--no-embargo"),
+    dedup_catalog: bool = typer.Option(False, "--dedup-catalog", help="Annotate catalog structural duplicates"),
+) -> None:
+    """Screening grid over operator templates; shares the bench PIT evaluation core."""
+    from finaince import sweep as sweep_mod
+
+    parsed_windows = tuple(int(x.strip()) for x in windows.split(",") if x.strip())
+    result = sweep_mod.run_sweep(
+        cost_bps=cost_bps,
+        embargo=not no_embargo,
+        rank_by=rank_by,
+        top=top,
+        workers=workers,
+        dedup_catalog=dedup_catalog,
+        windows=parsed_windows or None,
     )
     typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
     if not result.get("ok"):

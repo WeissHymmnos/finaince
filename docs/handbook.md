@@ -223,7 +223,9 @@ finaince --help
 | `jobs [--cancel ID]` | 作业列表 / 取消 |
 | `trace [--limit N]` | 研究事件链（每条带 hypothesis） |
 | `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 因子/模型交替环，支持表达式队列批量；模型步自动尝试跨 ready 因子动态组合（WS-I）；`--workers N`（1–8）对队列做进程级并行预评估 |
-| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps）；`--sync` 需米筐凭据先抓缓存。已跑通的首表（2026-08）：rank_delta_20 IS IC +0.0038 / OOS +0.0113；reversal_5 OOS 净 Sharpe +0.54 对 IS −0.62 反号照实报；种子因子为管线验证器非 alpha 主张 |
+| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表；`--sync` 需米筐凭据抓缓存（现支持 2014 起）。`--cost-sweep 0,5,10,20` 出成本敏感度曲线；`--no-embargo` 关闭窗口末日剔除（默认开启防前瞻跨界）；`--neutralize-vs <种子名>` 截面残差化。缓存已含 2014–2024 十一年与 21 个再平衡快照（2016-06-10 为数据源缺口，provenance 显式列出）。扩展窗首批读数：reversal_5 IS rankIC +0.0385、OOS 净 Sharpe +0.54 对 IS −0.86 反号照实报 |
+| `walkforward [--start --end --cost-bps --neutralize-vs]` | 逐年折叠稳健性：IC mean±std + 正折比例。十折首批读数：reversal_5 rankIC +0.040±0.028、90% 折为正，中性化后仍 +0.035——种子中唯一跨十年稳定信号 |
+| `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 筛选地图：6 模板×字段×窗口网格直编 polars，复用 bench PIT 核（数字直接可比）；spawn 并行；JSON+MD 工件落盘。首批发现 compression 族 OOS IC≈0.036 但 IS≈0——标注为待查信号非主张 |
 | `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
 | `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
 | `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |

@@ -410,6 +410,93 @@ def _window_metrics(
     }
 
 
+def _icir_of(vals: list[float]) -> tuple[float | None, float | None]:
+    if len(vals) < 20:
+        return None, None
+    mu = sum(vals) / len(vals)
+    sd = math.sqrt(sum((x - mu) ** 2 for x in vals) / len(vals))
+    return round(mu, 6), round(mu / sd, 4) if sd else None
+
+
+def component_gaps() -> list[str]:
+    """Expected Jun/Dec rebalance dates with no constituent snapshot on disk.
+
+    A missing snapshot means universe_for_date bridges with the previous
+    one; the gap is surfaced here so bridging stays visible, never silent.
+    """
+    comp = components_map()
+    if not comp:
+        return []
+    present = set(comp)
+    first, last = min(present), max(present)
+    return [d.isoformat() for d in rebalance_dates(first, last) if d not in present]
+
+
+def _scoped_universe(
+    universe_by_day_all: dict[Any, set[str]],
+    w_start: date,
+    w_end: date,
+    *,
+    embargo: bool,
+) -> dict[Any, set[str]]:
+    days = sorted(d for d in universe_by_day_all if w_start <= d <= w_end)
+    if embargo and len(days) > 1:
+        # The last day's forward return uses the next window's close.
+        days = days[:-1]
+    return {d: universe_by_day_all[d] for d in days}
+
+
+def _factor_artifacts(
+    scores: Any, forwards: Any, scoped_universe: dict[Any, set[str]]
+) -> dict[str, Any]:
+    return {
+        "ic_vals": _daily_ic(scores, forwards, scoped_universe, spearman=False),
+        "rank_vals": _daily_ic(scores, forwards, scoped_universe, spearman=True),
+        "ls": _layered_long_short(scores, forwards, scoped_universe),
+    }
+
+
+def _metrics_from_artifacts(artifacts: dict[str, Any], cost_bps: float) -> dict[str, Any]:
+    ic_mean, ic_ir = _icir_of(artifacts["ic_vals"])
+    rank_mean, rank_ir = _icir_of(artifacts["rank_vals"])
+    ls, turnover = artifacts["ls"]
+    return {
+        "ic": ic_mean,
+        "rank_ic": rank_mean,
+        "icir": ic_ir,
+        **_window_metrics(ls, cost_bps, turnover),
+    }
+
+
+def _neutralize_scores(frame: Any, name: str, controls: list[str]) -> Any:
+    """Cross-sectional OLS residuals of seed ``name`` against control seeds."""
+    import polars as pl
+
+    joined = _factor_scores(frame, name)
+    for i, ctrl in enumerate(controls):
+        joined = joined.join(
+            _factor_scores(frame, ctrl).rename({"_score": f"_c{i}"}),
+            on=["trade_date", "ts_code"],
+            how="inner",
+        )
+    joined = joined.drop_nulls(subset=["_score", *[f"_c{i}" for i in range(len(controls))]])
+    control_cols = [f"_c{i}" for i in range(len(controls))]
+
+    def _resid(group: "pl.DataFrame") -> "pl.DataFrame":
+        import numpy as np
+
+        y = group["_score"].to_numpy().astype(float)
+        X = np.column_stack(
+            [np.ones(len(group))]
+            + [group[c].to_numpy().astype(float) for c in control_cols]
+        )
+        coef, *_ = np.linalg.lstsq(X, y, rcond=None)
+        return group.with_columns(pl.Series("_score", y - X @ coef))
+
+    parts = [_resid(g) for g in joined.partition_by("trade_date")]
+    return pl.concat(parts).select(["trade_date", "ts_code", "_score"])
+
+
 def run_bench(
     *,
     is_start: str = "2019-01-01",
@@ -418,6 +505,9 @@ def run_bench(
     oos_end: str = "2024-12-31",
     cost_bps: float = 5.0,
     verify_hash: bool = True,
+    costs: list[float] | None = None,
+    embargo: bool = True,
+    neutralize_vs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Citable double-window benchmark table over the cached point-in-time universe."""
 
@@ -428,6 +518,9 @@ def run_bench(
     provenance = {
         "windows": {name: {"start": w[0].isoformat(), "end": w[1].isoformat()} for name, w in windows.items()},
         "cost_bps": cost_bps,
+        "costs": sorted(set(costs)) if costs else [cost_bps],
+        "embargo_last_day": embargo,
+        "neutralize_vs": neutralize_vs or [],
         "universe_source": "point_in_time",
         "index_code": INDEX_CODE,
         "data_version": CACHE_VERSION,
@@ -454,6 +547,16 @@ def run_bench(
     except (FileNotFoundError, ValueError) as exc:
         return {"ok": False, "error": str(exc), "provenance": provenance}
 
+    provenance["component_gaps"] = component_gaps()
+
+    factor_names = [name for name, _ in SEED_FACTORS]
+    controls: list[str] = []
+    if neutralize_vs:
+        invalid = [c for c in neutralize_vs if c not in factor_names]
+        if invalid:
+            return {"ok": False, "error": f"unknown neutralize_vs seeds: {invalid}", "provenance": provenance}
+        controls = [c for c in neutralize_vs]
+
     universe_by_day_all: dict[Any, set[str]] = {}
     for day in set(frame["trade_date"].to_list()):
         members = universe_for_date(day, comp)
@@ -462,44 +565,172 @@ def run_bench(
 
     forwards = _forward_returns(frame)
     table: list[dict[str, Any]] = []
+    artifacts_by_factor: dict[str, dict[str, dict[str, Any]]] = {}
     for name, expression in SEED_FACTORS:
-        scores = _factor_scores(frame, name)
+        if neutralize_vs:
+            scores = _neutralize_scores(frame, name, [c for c in controls if c != name])
+        else:
+            scores = _factor_scores(frame, name)
         row: dict[str, Any] = {
             "factor": name,
             "expression": expression,
             "dialect": "repro_polars",
         }
+        factor_arts: dict[str, dict[str, Any]] = {}
         for label, (w_start, w_end) in windows.items():
-            scoped_universe = {
-                d: m for d, m in universe_by_day_all.items() if w_start <= d <= w_end
-            }
-            ic_vals = _daily_ic(scores, forwards, scoped_universe, spearman=False)
-            rank_vals = _daily_ic(scores, forwards, scoped_universe, spearman=True)
-            ls, turnover = _layered_long_short(scores, forwards, scoped_universe)
-
-            def _icir(vals: list[float]) -> tuple[float | None, float | None]:
-                if len(vals) < 20:
-                    return None, None
-                mu = sum(vals) / len(vals)
-                sd = math.sqrt(sum((x - mu) ** 2 for x in vals) / len(vals))
-                return round(mu, 6), round(mu / sd, 4) if sd else None
-
-            ic_mean, ic_ir = _icir(ic_vals)
-            rank_mean, rank_ir = _icir(rank_vals)
-            metrics = _window_metrics(ls, cost_bps, turnover)
-            row[label] = {
-                "ic": ic_mean,
-                "rank_ic": rank_mean,
-                "icir": ic_ir,
-                **metrics,
-            }
+            scoped = _scoped_universe(universe_by_day_all, w_start, w_end, embargo=embargo)
+            arts = _factor_artifacts(scores, forwards, scoped)
+            factor_arts[label] = arts
+            row[label] = _metrics_from_artifacts(arts, cost_bps)
+        artifacts_by_factor[name] = factor_arts
         table.append(row)
-    return {
+
+    result: dict[str, Any] = {
         "ok": True,
         "provenance": provenance,
         "table": table,
         "markdown": render_markdown(table, provenance),
     }
+
+    if costs and len(set(costs)) > 1:
+        curve_rows: list[dict[str, Any]] = []
+        for c in sorted(set(costs)):
+            for name, _ in SEED_FACTORS:
+                entry: dict[str, Any] = {"cost_bps": c, "factor": name}
+                for label in windows:
+                    m = _metrics_from_artifacts(artifacts_by_factor[name][label], c)
+                    entry[label] = {"sharpe_net": m.get("sharpe_net"), "ar_net": m.get("ar_net")}
+                curve_rows.append(entry)
+        result["cost_curve"] = curve_rows
+        lines = ["", "# 成本敏感度（net Sharpe / 年化）", "", "| cost_bps | factor | IS sharpe | OOS sharpe | IS ar | OOS ar |", "|---|---|---|---|---|---|"]
+        for entry in curve_rows:
+            lines.append(
+                f"| {entry['cost_bps']} | {entry['factor']} "
+                f"| {entry['IS']['sharpe_net']} | {entry['OOS']['sharpe_net']} "
+                f"| {entry['IS']['ar_net']} | {entry['OOS']['ar_net']} |"
+            )
+        result["markdown"] += "\n".join(lines)
+
+    return result
+
+
+def run_walkforward(
+    *,
+    start: str = "2019-01-01",
+    end: str = "2023-12-31",
+    cost_bps: float = 5.0,
+    embargo: bool = True,
+    neutralize_vs: list[str] | None = None,
+    verify_hash: bool = True,
+) -> dict[str, Any]:
+    """Per-calendar-year folds; IC mean/std across folds plus positive-fold ratio."""
+    s = date.fromisoformat(start)
+    e = date.fromisoformat(end)
+    provenance: dict[str, Any] = {
+        "folds": [str(y) for y in range(s.year, e.year + 1)],
+        "cost_bps": cost_bps,
+        "embargo_last_day": embargo,
+        "neutralize_vs": neutralize_vs or [],
+        "universe_source": "point_in_time",
+        "index_code": INDEX_CODE,
+        "data_version": CACHE_VERSION,
+    }
+    try:
+        missing_probe = [
+            year
+            for year in range(s.year, e.year + 1)
+            if not (_year_dir(year) / f"csi300_{year}.parquet").exists()
+        ]
+        if missing_probe:
+            raise FileNotFoundError(f"data_track cache incomplete; missing years: {missing_probe}")
+        comp = components_map()
+        if not comp:
+            raise FileNotFoundError("constituents cache empty; run `finaince bench --sync` first")
+        earliest = min(comp)
+        frame = read_years(
+            max(earliest, date(s.year, 1, 1)), date(e.year, 12, 31), verify_hash=verify_hash
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "provenance": provenance}
+
+    factor_names = [name for name, _ in SEED_FACTORS]
+    controls: list[str] = []
+    if neutralize_vs:
+        invalid = [c for c in neutralize_vs if c not in factor_names]
+        if invalid:
+            return {"ok": False, "error": f"unknown neutralize_vs seeds: {invalid}", "provenance": provenance}
+        controls = list(neutralize_vs)
+
+    universe_by_day_all: dict[Any, set[str]] = {}
+    for day in set(frame["trade_date"].to_list()):
+        members = universe_for_date(day, comp)
+        if members:
+            universe_by_day_all[day] = set(members)
+    forwards = _forward_returns(frame)
+
+    rows: list[dict[str, Any]] = []
+    for name, expression in SEED_FACTORS:
+        if neutralize_vs:
+            scores = _neutralize_scores(frame, name, [c for c in controls if c != name])
+        else:
+            scores = _factor_scores(frame, name)
+        fold_rows: list[dict[str, Any]] = []
+        for year in range(s.year, e.year + 1):
+            scoped = _scoped_universe(
+                universe_by_day_all, date(year, 1, 1), date(year, 12, 31), embargo=embargo
+            )
+            metrics = _metrics_from_artifacts(_factor_artifacts(scores, forwards, scoped), cost_bps)
+            if "insufficient_days" in metrics:
+                continue
+            fold_rows.append({"year": year, **metrics})
+        valid_ics = [f["ic"] for f in fold_rows if f.get("ic") is not None]
+        valid_rics = [f["rank_ic"] for f in fold_rows if f.get("rank_ic") is not None]
+        sharpe_vals = [f["sharpe_net"] for f in fold_rows if f.get("sharpe_net") is not None]
+
+        def _mean_std(vals: list[float]) -> tuple[float | None, float | None]:
+            if not vals:
+                return None, None
+            mu = sum(vals) / len(vals)
+            sd = math.sqrt(sum((v - mu) ** 2 for v in vals) / len(vals)) if len(vals) > 1 else None
+            return round(mu, 6), round(sd, 6) if sd is not None else None
+
+        ic_mean, ic_std = _mean_std(valid_ics)
+        ric_mean, ric_std = _mean_std(valid_rics)
+        sh_mean, sh_std = _mean_std(sharpe_vals)
+        rows.append(
+            {
+                "factor": name,
+                "expression": expression,
+                "folds": len(fold_rows),
+                "ic_mean": ic_mean,
+                "ic_std": ic_std,
+                "rank_ic_mean": ric_mean,
+                "rank_ic_std": ric_std,
+                "rank_ic_positive_ratio": (
+                    round(sum(1 for v in valid_rics if v > 0) / len(valid_rics), 4)
+                    if valid_rics
+                    else None
+                ),
+                "sharpe_net_mean": sh_mean,
+                "sharpe_net_std": sh_std,
+                "fold_detail": fold_rows,
+            }
+        )
+    lines = [
+        "# Walk-forward 折叠稳健性",
+        "",
+        f"- folds: {provenance['folds']}, cost_bps {cost_bps}, embargo_last_day {embargo}",
+        "",
+        "| factor | folds | IC mean±std | rank_ic mean±std | rank_ic>0 比例 | sharpe_net mean±std |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append(
+            f"| {r['factor']} | {r['folds']} "
+            f"| {r['ic_mean']}±{r['ic_std']} | {r['rank_ic_mean']}±{r['rank_ic_std']} "
+            f"| {r['rank_ic_positive_ratio']} | {r['sharpe_net_mean']}±{r['sharpe_net_std']} |"
+        )
+    return {"ok": True, "provenance": provenance, "rows": rows, "markdown": "\n".join(lines)}
 
 
 def render_markdown(table: list[dict[str, Any]], provenance: dict[str, Any]) -> str:
