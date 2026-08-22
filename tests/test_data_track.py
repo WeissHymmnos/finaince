@@ -527,3 +527,48 @@ def test_candidate_walkforward_combine_top(isolated_home):
     none_opt = sweep_mod.run_candidate_walkforward(specs=specs)
     assert all(not r["name"].startswith("combined") for r in none_opt["rows"])
     assert none_opt["provenance"]["combine_top"] is None
+
+    bad_mode = sweep_mod.run_candidate_walkforward(
+        specs=specs, combine_weighting="momentum"
+    )
+    assert bad_mode["ok"] is False
+    assert "combine_weighting" in bad_mode["error"]
+
+
+def test_candidate_walkforward_adaptive_weighting(isolated_home):
+    from finaince import sweep as sweep_mod
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    grid = {c["name"]: c for c in sweep_mod.build_grid(windows=(5,))}
+    specs = [grid["mom_close_5"], grid["compression_close_5"]]
+
+    single = sweep_mod.run_candidate_walkforward(
+        specs=specs[:1],
+        combine_top=1,
+        combine_weighting="adaptive_inv_vol",
+    )
+    adaptive_one = next(
+        r for r in single["rows"] if r["name"] == "combined_top_1_adaptive"
+    )
+    member = next(r for r in single["rows"] if r["name"] == "mom_close_5")
+    assert adaptive_one["ok"] is True
+    for f_c, f_m in zip(adaptive_one["fold_detail"], member["fold_detail"]):
+        assert f_c["rank_ic"] == pytest.approx(f_m["rank_ic"], abs=1e-9)
+
+    both = sweep_mod.run_candidate_walkforward(
+        specs=specs, combine_top=2, combine_weighting="adaptive_inv_vol"
+    )
+    combo = next(
+        r for r in both["rows"] if r["name"] == "combined_top_2_adaptive"
+    )
+    assert combo["ok"] is True, combo.get("error")
+    wby = combo["weights_by_year"]
+    assert set(wby) == {str(y) for y in range(2019, 2025)}
+    first_two_neutral = all(
+        abs(w - 0.5) < 1e-9 for y in ("2019", "2020") for w in wby[y].values()
+    )
+    assert first_two_neutral
+    for year, weights in wby.items():
+        assert pytest.approx(sum(abs(w) for w in weights.values()), abs=1e-6) == 1.0
+    later = wby["2023"]
+    assert any(abs(w - 0.5) > 1e-6 for w in later.values())

@@ -555,44 +555,93 @@ def _candidate_fold_chunk(
 
 
 def _combined_fold_row(
-    picked_specs: list[dict[str, Any]], cfg: dict[str, Any]
+    picked_specs: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    member_rank_ics: dict[str, dict[int, float]] | None = None,
+    weighting: str = "equal",
 ) -> dict[str, Any]:
-    """Equal-weight rank mean of the globally ranked top specs, same folds."""
+    """Rank-combine the globally ranked top specs on the same folds.
+
+    ``weighting="adaptive_inv_vol"`` derives each year's member weights from
+    folds STRICTLY BEFORE that year (sign x inverse dispersion of rankIC);
+    years without at least two observations fall back to neutral weights —
+    no look-ahead by construction. ``weights_by_year`` is emitted for audit.
+    """
     import polars as pl
 
+    adaptive = weighting == "adaptive_inv_vol"
+    suffix = "_adaptive" if adaptive else ""
     combined_row: dict[str, Any] = {
-        "name": f"combined_top_{len(picked_specs)}",
-        "expression": "mean of cross-sectional ordinal ranks",
+        "name": f"combined_top_{len(picked_specs)}{suffix}",
+        "expression": "weighted mean of cross-sectional ordinal ranks",
         "template": "combined",
         "field": "-",
         "window": "-",
         "members": [s["name"] for s in picked_specs],
+        "weighting": weighting,
     }
     try:
         panel, universe_by_day_all, forwards = _load_eval_context(cfg)
         acc = None
-        for spec in picked_specs:
-            sf = _score_spec(panel, spec)
-            acc = sf.rename({"_score": "_acc"}) if acc is None else (
-                acc.join(sf, on=["trade_date", "ts_code"], how="inner")
-                .with_columns((pl.col("_acc") + pl.col("_score")).alias("_acc"))
-                .drop("_score")
+        col_of: dict[str, str] = {}
+        for i, spec in enumerate(picked_specs):
+            col = f"_m{i}"
+            col_of[spec["name"]] = col
+            sf = _score_spec(panel, spec).rename({"_score": col})
+            acc = (
+                sf.select(["trade_date", "ts_code", col])
+                if acc is None
+                else acc.join(sf, on=["trade_date", "ts_code"], how="inner")
             )
         years = range(int(cfg["start_year"]), int(cfg["end_year"]) + 1)
         cadence = max(1, int(cfg.get("rebalance_every", 1)))
-        combined = acc.with_columns(
-            (pl.col("_acc") / len(picked_specs)).alias("_raw")
-        ).with_columns(
-            pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
-        )
-        scores = combined.select(["trade_date", "ts_code", "_score"])
+        k = len(picked_specs)
+
+        def _weights_for(year: int) -> dict[str, float]:
+            neutral = {s["name"]: 1.0 / k for s in picked_specs}
+            if not adaptive or not member_rank_ics:
+                return neutral
+            weights: dict[str, float] = {}
+            for s in picked_specs:
+                history = [
+                    v
+                    for y, v in sorted((member_rank_ics.get(s["name"]) or {}).items())
+                    if y < year and v is not None
+                ]
+                if len(history) >= 2:
+                    mu = sum(history) / len(history)
+                    sd = math.sqrt(
+                        sum((v - mu) ** 2 for v in history) / len(history)
+                    )
+                    weights[s["name"]] = (1.0 if mu >= 0 else -1.0) / (sd + 1e-6)
+                else:
+                    weights[s["name"]] = neutral[s["name"]]
+            return weights
+
+        weights_by_year: dict[str, dict[str, float]] = {}
         fold_rows: list[dict[str, Any]] = []
         for year in years:
+            wmap = _weights_for(year)
+            total = sum(abs(w) for w in wmap.values()) or 1.0
+            weights_by_year[str(year)] = {
+                name: round(w / total, 6) for name, w in wmap.items()
+            }
+            expr = None
+            for s in picked_specs:
+                term = pl.col(col_of[s["name"]]) * (wmap[s["name"]] / total)
+                expr = term if expr is None else expr + term
             scoped = _scoped_universe(
                 universe_by_day_all,
                 date(year, 1, 1),
                 date(year, 12, 31),
                 embargo=cfg["embargo"],
+            )
+            scores = (
+                acc.with_columns(expr.alias("_raw"))
+                .with_columns(
+                    pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+                )
+                .select(["trade_date", "ts_code", "_score"])
             )
             ic_vals = _daily_ic(scores, forwards, scoped, spearman=False)
             rank_vals = _daily_ic(scores, forwards, scoped, spearman=True)
@@ -636,6 +685,7 @@ def _combined_fold_row(
                 "sharpe_net_mean": sh_mean,
                 "sharpe_net_std": sh_std,
                 "fold_detail": fold_rows,
+                "weights_by_year": weights_by_year,
                 "ok": True,
             }
         )
@@ -653,6 +703,7 @@ def run_candidate_walkforward(
     workers: int = 1,
     rebalance_every: int = 1,
     combine_top: int | None = None,
+    combine_weighting: str = "equal",
 ) -> dict[str, Any]:
     """Per-calendar-year folds over screening candidates on the bench PIT core.
 
@@ -662,14 +713,22 @@ def run_candidate_walkforward(
     citable claims still require run_bench + the full gate chain.
     ``rebalance_every > 1`` switches the LS legs to a held-legs cadence
     (screening-layer experiment; churn charged on refresh days only).
-    ``combine_top`` additionally evaluates the equal-weight mean of the top-N
-    candidates' cross-sectional ordinal ranks as one synthetic factor.
+    ``combine_top`` additionally evaluates the mean of the top-N candidates'
+    cross-sectional ordinal ranks as one synthetic factor; ``combine_weighting``
+    selects equal or expanding-window inverse-vol member weights.
     """
+    if combine_weighting not in ("equal", "adaptive_inv_vol"):
+        return {
+            "ok": False,
+            "error": f"unknown combine_weighting: {combine_weighting}",
+            "provenance": {},
+        }
     provenance: dict[str, Any] = {
         "cost_bps": cost_bps,
         "embargo_last_day": embargo,
         "rebalance_every": max(1, int(rebalance_every)),
         "combine_top": int(combine_top) if combine_top else None,
+        "combine_weighting": combine_weighting,
         "candidates": len(specs),
         "universe_source": "point_in_time",
         "index_code": INDEX_CODE,
@@ -708,6 +767,7 @@ def run_candidate_walkforward(
         "end_year": last_year,
         "rebalance_every": max(1, int(rebalance_every)),
         "combine_top": int(combine_top) if combine_top else 0,
+        "combine_weighting": combine_weighting,
     }
 
     all_rows: list[dict[str, Any]] = []
@@ -735,7 +795,25 @@ def run_candidate_walkforward(
             s for s in specs if s.get("template") in TEMPLATES
         ][:combine_n]
         if picked:
-            all_rows.append(_combined_fold_row(picked, cfg))
+            member_rank_ics: dict[str, dict[int, float]] = {}
+            for r in all_rows:
+                if not (r.get("ok") and r.get("fold_detail")):
+                    continue
+                stats: dict[int, float] = {}
+                for f in r["fold_detail"]:
+                    ric = f.get("rank_ic")
+                    if ric is not None:
+                        stats[int(f["year"])] = float(ric)
+                if stats:
+                    member_rank_ics[r["name"]] = stats
+            all_rows.append(
+                _combined_fold_row(
+                    picked,
+                    cfg,
+                    member_rank_ics=member_rank_ics or None,
+                    weighting=combine_weighting,
+                )
+            )
             combined = all_rows[-1]
             if combined.get("ok"):
                 ok_rows.append(combined)

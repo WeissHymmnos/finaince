@@ -619,6 +619,7 @@ def wf_candidates_cmd(
     rebalance_every: int = typer.Option(1, "--rebalance-every", min=1, help="Refresh LS legs every Nth trading day (screening-layer cadence experiment)"),
     combine_top: Optional[int] = typer.Option(None, "--combine-top", min=1, help="Also evaluate the equal-weight rank mean of the top-N candidates"),
     per_family: Optional[int] = typer.Option(None, "--per-family", min=1, help="Cap picks per template so the budget spans families"),
+    combine_weighting: str = typer.Option("equal", "--combine-weighting", help="equal | adaptive_inv_vol (expanding-window, no look-ahead)"),
 ) -> None:
     """Yearly-fold robustness for the top sweep candidates on the bench PIT core."""
     from finaince import sweep as sweep_mod
@@ -638,6 +639,7 @@ def wf_candidates_cmd(
         workers=workers,
         rebalance_every=rebalance_every,
         combine_top=combine_top,
+        combine_weighting=combine_weighting,
     )
     typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
     if not result.get("ok"):

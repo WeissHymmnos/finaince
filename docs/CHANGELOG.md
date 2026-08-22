@@ -265,7 +265,9 @@ top-15 全为 compression 族（close/high/low × 窗口 5–60），十一折�
 
 **跨族组合突破（同会话追加，本会话最强发现）**：新增 `per_family` / CLI `--per-family` 配额选样（按全局排序走查、每模板限量，预算跨族分布）。逐族体检暴露两件事：(1) compression 之外各族最佳折均值大多为负；(2) **rev_volume_10 是第二个十年持久信号——rankIC +0.0211±0.0110，11 折全正（100%）**，稳定性优于 compression（82%），但日度换手毒性更深（shpN −1.09）。等权合成正负混合成员会被拖累（combined_top_12 = −0.010）；只合成两个真信号（compression_close_5 + rev_volume_10）时：**combined_top_2 rankIC +0.0309±0.0175，11 折全正，折级 t≈5.9**——超过任一单因子且离散更低，跨族分散在本平台真实数据上首次兑现。降频至 5 日后组合净 Sharpe 从 −0.93 回升到 −0.15（rev 单族 −0.02 接近打平）。诚实边界：排序层 t≈5.9 是全平台最强真实宇宙信号，五分位多空在 5 bps 下仍未转正——可交易性需要更长持仓或低换手组合内的排序用法；以上全部数字 screening 层口径（PIT csi300 v1、2014–2024 十一折、5 bps 双边），可引用结论仍需 run_bench + 全门禁。
 
-测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）；combine_top 确定性契约测试后 278→279（N=1 合成行必须逐折等于成员行）；per_family 断言并入既有 top_specs 契约测试，基线维持 279。
+**自适应加权组合（同会话追加）**：`combine_weighting=adaptive_inv_vol` / CLI `--combine-weighting`——每一年份的成员权重只用该年**之前**折的 rankIC（sign×逆离散度，不足两年观测回退中性等权），构造上无前视；合成行暴露 `weights_by_year` 审计轨迹（归一化 Σ|w|=1）。十二族预算对照：equal −0.010（27% 折正）→ adaptive **+0.0098（82% 折正）**——符号对齐把负族翻成反向使用，权重漂移表清晰可见 compression/rev 持续正权、zma/mom/shock/ma_dist 持续负权。诚实结论：自适应加权修复符号问题但不无中生有——远低于精选两信号的 +0.031；**选择强于修正**，弱成员即使翻转也稀释组合。adaptive 模式的正确用途是「哪些族真带信号」的诊断器，而非收益修复器。
+
+测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）；combine_top 确定性契约测试后 278→279（N=1 合成行必须逐折等于成员行）；per_family 断言并入既有 top_specs 契约测试，基线维持 279；adaptive 契约测试后 279→280（N=1 自适应恒等、前两年中性、Σ|w|=1、无效模式 fail-closed）。
 
 测试基线：274→276（top_specs fail-closed 排序契约 + candidate walkforward hermetic 全链路含失败行记账）；追加换手假说检验后 276→278。
 
