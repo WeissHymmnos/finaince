@@ -302,3 +302,111 @@ def test_sweep_grid_and_hermetic_run(isolated_home):
     from pathlib import Path
 
     assert Path(result["artifact"]).exists()
+
+
+def test_top_specs_from_artifact_fail_closed_and_ranked(isolated_home, tmp_path):
+    import json
+
+    from finaince import sweep as sweep_mod
+
+    with pytest.raises(ValueError):
+        sweep_mod.top_specs_from_artifact(tmp_path / "missing.json", 5)
+
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps({"rows": [{"ok": False}]}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        sweep_mod.top_specs_from_artifact(empty, 5)
+
+    artifact = tmp_path / "sweep_test.json"
+    rows = [
+        {
+            "ok": True,
+            "name": "a",
+            "template": "mom",
+            "field": "close",
+            "window": 5,
+            "expression": "Rank(Delta(close, 5))",
+            "OOS": {"rank_ic": 0.01},
+        },
+        {
+            "ok": True,
+            "name": "b",
+            "template": "compression",
+            "field": "close",
+            "window": 10,
+            "expression": "-Rank(Max(close, 10) - Min(close, 10))",
+            "OOS": {"rank_ic": 0.06},
+        },
+        {"ok": False, "name": "c"},
+    ]
+    artifact.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+    specs = sweep_mod.top_specs_from_artifact(artifact, 1)
+    assert [s["name"] for s in specs] == ["b"]
+    assert specs[0]["window"] == 10
+    both = sweep_mod.top_specs_from_artifact(artifact, 2)
+    assert [s["name"] for s in both] == ["b", "a"]
+
+    with pytest.raises(ValueError):
+        sweep_mod.top_specs_from_artifact(
+            _write_artifact_with_template(tmp_path, "nope"), 1
+        )
+
+
+def _write_artifact_with_template(tmp_path, template: str):
+    import json
+
+    artifact = tmp_path / "sweep_bad.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "ok": True,
+                        "name": "x",
+                        "template": template,
+                        "field": "close",
+                        "window": 5,
+                        "expression": "Rank(Delta(close, 5))",
+                        "OOS": {"rank_ic": 0.05},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return artifact
+
+
+def test_candidate_walkforward_hermetic(isolated_home):
+    from finaince import sweep as sweep_mod
+
+    assert sweep_mod.run_candidate_walkforward(specs=[])["ok"] is False
+    assert sweep_mod.run_candidate_walkforward(
+        specs=[{"name": "x", "template": "mom", "field": "close", "window": 5, "expression": "Rank(Delta(close, 5))"}]
+    )["ok"] is False
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    grid = {c["name"]: c for c in sweep_mod.build_grid(windows=(5,))}
+    specs = [grid["mom_close_5"], grid["compression_close_5"]]
+    result = sweep_mod.run_candidate_walkforward(specs=specs)
+    assert result["ok"] is True, result.get("error")
+    assert result["evaluated"] == 2
+    assert result["provenance"]["years"] == [2019, 2024]
+    for row in result["rows"]:
+        assert row["folds"] >= 4
+        assert row["rank_ic_positive_ratio"] is not None
+        assert row["fold_detail"], row
+        for fold in row["fold_detail"]:
+            assert fold["year"] in range(2019, 2025)
+
+    from pathlib import Path
+
+    artifact_path = Path(result["artifact"])
+    assert artifact_path.exists()
+    assert artifact_path.with_suffix(".md").exists()
+
+    bad_spec = dict(grid["mom_close_5"], template="not_a_template")
+    broken = sweep_mod.run_candidate_walkforward(specs=[bad_spec])
+    assert broken["evaluated"] == 0
+    assert broken["failed"] == 1
+    assert broken["failed_rows"] == ["mom_close_5"]

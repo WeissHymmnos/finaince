@@ -82,6 +82,7 @@ The true-universe track has run: `finaince bench --sync` downloaded the point-in
 - Generation-side regularization: AST originality (`homogeneous`) + complexity ceiling (`overcomplex`) gates, structural near-dup culling, catalog `expr_hash` dedup
 - Throughput: process-level local-panel cache, pending-job duplicate guard, `FINAINCE_MAX_JOBS` cap, sign-reflection for significant negative-IC factors
 - True-universe track (`finaince bench`): point-in-time CSI300 cache with sha256 manifests, citable IS/OOS table net of 5 bps
+- Screening map (`finaince sweep`) with candidate walk-forward validation (`finaince wf-candidates`): template-grid screening and per-year fold robustness on the same PIT core; exploratory numbers stay clearly labeled
 - Sandbox layering: optional bubblewrap above frozen builtins, honest `via` tagging and automatic fallback
 - Governed code-factor evolution: LLM-written `compute(panel)` in the sandbox, failure-retrieval rewrites, full gate coverage
 - Dynamic combination: daily inverse-volatility weights across ready factors (no look-ahead), turnover-costed; loop bandit reward upgraded to net Sharpe

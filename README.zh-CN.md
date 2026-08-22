@@ -201,6 +201,7 @@ FinAlpha 提供了一套完整的因子管理和研报复现解决方案，具�
 - **生成端正则化**：AST 结构查重门禁 `homogeneous` 与复杂度上限 `overcomplex`；候选入池前近重复直接淘汰；catalog 带 `expr_hash` O(1) 查重
 - **吞吐优化**：进程级本地 panel 缓存、在途作业查重守卫、`FINAINCE_MAX_JOBS` 并发上限、显著负 IC 因子的符号镜像
 - **真宇宙数字轨**：`finaince bench` 输出 CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps），缓存带 sha256 清单，数字可第三方复现
+- **筛选地图与折叠验证**：`finaince sweep` 模板网格筛选 + `finaince wf-candidates` 候选逐年折稳健性，同一 PIT 核，探索性数字明确标注非可引用结论
 - **沙箱分层**：冻结内建之上可选 bubblewrap 层（`--new-session --unshare-all`），结果诚实标注实际层，失败自动回落
 - **治理内代码因子进化**：LLM 写完整 `compute(panel)` 进沙箱，失败按错误前缀 + AST 差异改写下一稿，产物全过门禁
 - **动态组合**：跨 ready 因子滚动逆波动率每日权重（严格无未来信息），换手计成本；loop 奖励升级为净 Sharpe

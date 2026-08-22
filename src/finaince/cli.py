@@ -608,6 +608,35 @@ def sweep_cmd(
         raise typer.Exit(code=1)
 
 
+@app.command("wf-candidates")
+def wf_candidates_cmd(
+    top: int = typer.Option(15, "--top", min=1),
+    from_sweep: Optional[Path] = typer.Option(None, "--from-sweep", help="sweep_*.json artifact; default latest"),
+    rank_by: str = typer.Option("oos_rank_ic", "--rank-by", help="oos_rank_ic|oos_icir|is_ic|..."),
+    cost_bps: float = typer.Option(5.0, "--cost-bps"),
+    no_embargo: bool = typer.Option(False, "--no-embargo"),
+    workers: int = typer.Option(1, "--workers", min=1, max=8),
+) -> None:
+    """Yearly-fold robustness for the top sweep candidates on the bench PIT core."""
+    from finaince import sweep as sweep_mod
+
+    artifact = from_sweep or sweep_mod.latest_sweep_artifact()
+    try:
+        specs = sweep_mod.top_specs_from_artifact(artifact, top, rank_by=rank_by)
+    except ValueError as exc:
+        typer.echo(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1) from exc
+    result = sweep_mod.run_candidate_walkforward(
+        specs=specs,
+        cost_bps=cost_bps,
+        embargo=not no_embargo,
+        workers=workers,
+    )
+    typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
+    if not result.get("ok"):
+        raise typer.Exit(code=1)
+
+
 @app.command("brain-submit")
 def brain_submit_cmd(
     expression: str = typer.Argument(..., help="FASTEXPR expression to adjudicate"),

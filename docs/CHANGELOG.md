@@ -245,6 +245,24 @@
 
 ---
 
+## 会话十：筛选候选逐年折叠验证——compression 裁决落地
+
+**新能力**：`sweep.run_candidate_walkforward()` + `top_specs_from_artifact()` + CLI `finaince wf-candidates [--top N --from-sweep PATH --rank-by]`。读最新（或指定）sweep 工件取 top-N 候选，在 bench PIT 核上逐年折算（2014→2024 十一折）：rankIC mean±std、正折比例、净 Sharpe mean±std、逐折明细。工件落 `cache/sweep/walkforward_*.json|md`；provenance 声明「screening-layer robustness check，可引用结论仍需 run_bench + 全门禁」。工件缺失/无 ok 行/未知模板一律 fail-closed（ValueError / failed_rows 记账）。spawn 进程池并行与 sweep 同款。
+
+**首批裁决（session 九遗留：compression 族 OOS 领先是否 2024 孤例）**
+
+top-15 全为 compression 族（close/high/low × 窗口 5–60），十一折结果高度一致：
+
+- **排序信号跨十年真实存在，非孤例**：rankIC mean ≈ +0.022~+0.025 ± ~0.025，9/11 折为正（73–82%），折级 t ≈ 3.4；
+- **但 5 bps 下不可独立交易**：日换手参与率 26–40%，净 Sharpe 折均值 −0.30~−0.51——成本毒性吞掉全部排序优势；
+- **结构细节**：净 Sharpe 为正的年份恰是 pearson IC 为负而 rankIC≈0 的年份（2019 +1.41 / 2020 +2.34）——那两年多空收益来自尾部行为而非单调排序；2023/2024 排序最强（+0.064/+0.062）但换手拖累依旧。
+
+**诚实定位**：compression 是低换手组合内的调节特征候选，不是独立 alpha；任何引用以上数字必须带「screening layer、5 bps、PIT csi300 v1、2014–2024 十一折」口径。
+
+测试基线：274→276（top_specs fail-closed 排序契约 + candidate walkforward hermetic 全链路含失败行记账）。
+
+---
+
 ## 关键不变量（全程遵守）
 
 1. 默认行为零破坏：每个工作单元落地时既有测试全绿（136→146→169→178 单调递增）。

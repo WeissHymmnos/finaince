@@ -226,6 +226,7 @@ finaince --help
 | `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表；`--sync` 需米筐凭据抓缓存（现支持 2014 起）。`--cost-sweep 0,5,10,20` 出成本敏感度曲线；`--no-embargo` 关闭窗口末日剔除（默认开启防前瞻跨界）；`--neutralize-vs <种子名>` 截面残差化。缓存已含 2014–2024 十一年与 21 个再平衡快照（2016-06-10 为数据源缺口，provenance 显式列出）。扩展窗首批读数：reversal_5 IS rankIC +0.0385、OOS 净 Sharpe +0.54 对 IS −0.86 反号照实报 |
 | `walkforward [--start --end --cost-bps --neutralize-vs]` | 逐年折叠稳健性：IC mean±std + 正折比例。十折首批读数：reversal_5 rankIC +0.040±0.028、90% 折为正，中性化后仍 +0.035——种子中唯一跨十年稳定信号 |
 | `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 筛选地图：6 模板×字段×窗口网格直编 polars，复用 bench PIT 核（数字直接可比）；spawn 并行；JSON+MD 工件落盘。首批发现 compression 族 OOS IC≈0.036 但 IS≈0——标注为待查信号非主张 |
+| `wf-candidates [--top N --from-sweep PATH --rank-by --cost-bps --workers]` | 筛选候选逐年折叠验证：读最新（或指定）sweep 工件取 top-N，逐年折算 rankIC mean±std + 正折比例 + 净 Sharpe。首批裁决：compression 族 rankIC 十一折 9 正、t≈3.4——排序信号跨十年真实存在，非 2024 孤例；但日换手参与率 26–40% 使净 Sharpe 均值 −0.45，5 bps 下不可独立交易，定位为低换手组合内的调节特征 |
 | `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
 | `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
 | `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |
