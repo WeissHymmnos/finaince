@@ -346,6 +346,36 @@ def test_top_specs_from_artifact_fail_closed_and_ranked(isolated_home, tmp_path)
     both = sweep_mod.top_specs_from_artifact(artifact, 2)
     assert [s["name"] for s in both] == ["b", "a"]
 
+    quota_rows = list(rows) + [
+        {
+            "ok": True,
+            "name": "d",
+            "template": "compression",
+            "field": "low",
+            "window": 5,
+            "expression": "-Rank(Max(low, 5) - Min(low, 5))",
+            "OOS": {"rank_ic": 0.05},
+        },
+        {
+            "ok": True,
+            "name": "e",
+            "template": "rev",
+            "field": "close",
+            "window": 5,
+            "expression": "-Rank(Delta(close, 5))",
+            "OOS": {"rank_ic": 0.04},
+        },
+    ]
+    quota_artifact = tmp_path / "sweep_quota.json"
+    quota_artifact.write_text(json.dumps({"rows": quota_rows}), encoding="utf-8")
+    diversified = sweep_mod.top_specs_from_artifact(
+        quota_artifact, 4, per_family=1
+    )
+    families = [s["template"] for s in diversified]
+    assert len(families) == len(set(families))
+    assert set(families) <= {"compression", "mom", "rev"}
+    assert len(diversified) == 3
+
     with pytest.raises(ValueError):
         sweep_mod.top_specs_from_artifact(
             _write_artifact_with_template(tmp_path, "nope"), 1

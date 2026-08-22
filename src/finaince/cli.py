@@ -618,13 +618,16 @@ def wf_candidates_cmd(
     workers: int = typer.Option(1, "--workers", min=1, max=8),
     rebalance_every: int = typer.Option(1, "--rebalance-every", min=1, help="Refresh LS legs every Nth trading day (screening-layer cadence experiment)"),
     combine_top: Optional[int] = typer.Option(None, "--combine-top", min=1, help="Also evaluate the equal-weight rank mean of the top-N candidates"),
+    per_family: Optional[int] = typer.Option(None, "--per-family", min=1, help="Cap picks per template so the budget spans families"),
 ) -> None:
     """Yearly-fold robustness for the top sweep candidates on the bench PIT core."""
     from finaince import sweep as sweep_mod
 
     artifact = from_sweep or sweep_mod.latest_sweep_artifact()
     try:
-        specs = sweep_mod.top_specs_from_artifact(artifact, top, rank_by=rank_by)
+        specs = sweep_mod.top_specs_from_artifact(
+            artifact, top, rank_by=rank_by, per_family=per_family
+        )
     except ValueError as exc:
         typer.echo(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         raise typer.Exit(code=1) from exc

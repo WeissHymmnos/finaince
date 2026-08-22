@@ -227,6 +227,7 @@ finaince --help
 | `walkforward [--start --end --cost-bps --neutralize-vs]` | 逐年折叠稳健性：IC mean±std + 正折比例。十折首批读数：reversal_5 rankIC +0.040±0.028、90% 折为正，中性化后仍 +0.035——种子中唯一跨十年稳定信号 |
 | `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 筛选地图：6 模板×字段×窗口网格直编 polars，复用 bench PIT 核（数字直接可比）；spawn 并行；JSON+MD 工件落盘。首批发现 compression 族 OOS IC≈0.036 但 IS≈0——标注为待查信号非主张 |
 | `wf-candidates [--top N --from-sweep PATH --rank-by --cost-bps --workers]` | 筛选候选逐年折叠验证：读最新（或指定）sweep 工件取 top-N，逐年折算 rankIC mean±std + 正折比例 + 净 Sharpe。首批裁决：compression 族 rankIC 十一折 9 正、t≈3.4——排序信号跨十年真实存在，非 2024 孤例；但日换手参与率 26–40% 使净 Sharpe 均值 −0.45，5 bps 下不可独立交易，定位为低换手组合内的调节特征 |
+| `wf-candidates [--per-family K --combine-top N --rebalance-every M]` | 进阶用法：`--per-family` 每族限量选样（预算跨族分布）；`--combine-top` 合成截面名次等权组合行走同一折叠核；`--rebalance-every` 腿每 M 日刷新。跨族裁决：rev_volume_10 为第二个十年持久信号（11 折全正）；combined_top_2（compression+rev）rankIC +0.031、11 折全正、折级 t≈5.9——全平台最强真实宇宙排序信号；5 bps 下净 Sharpe 仍负，可交易性待低换手构造 |
 | `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
 | `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
 | `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |

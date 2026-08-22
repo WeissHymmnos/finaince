@@ -317,12 +317,17 @@ def latest_sweep_artifact() -> Path | None:
 
 
 def top_specs_from_artifact(
-    path: str | Path, top: int, rank_by: str = "oos_rank_ic"
+    path: str | Path,
+    top: int,
+    rank_by: str = "oos_rank_ic",
+    per_family: int | None = None,
 ) -> list[dict[str, Any]]:
     """Rebuild grid specs for the top-N rows of a sweep artifact.
 
     Raises ValueError when the artifact is missing, unreadable, or holds no
     ok rows — callers degrade fail-closed instead of walking an empty grid.
+    ``per_family`` caps picks per template while walking the global ranking,
+    so the budget spans families instead of one dominant cluster.
     """
     artifact = Path(path)
     if not artifact.exists():
@@ -342,7 +347,21 @@ def top_specs_from_artifact(
         value = (r.get(window) or {}).get(metric_name)
         return value if isinstance(value, (int, float)) else float("-inf")
 
-    ranked = sorted(ok_rows, key=sort_key, reverse=True)[: max(1, int(top))]
+    ranked = sorted(ok_rows, key=sort_key, reverse=True)
+    quota = max(1, int(per_family)) if per_family else None
+    if quota:
+        picked_rows: list[dict[str, Any]] = []
+        counts: dict[str, int] = {}
+        for row in ranked:
+            family = str(row.get("template"))
+            if counts.get(family, 0) >= quota:
+                continue
+            picked_rows.append(row)
+            counts[family] = counts.get(family, 0) + 1
+            if len(picked_rows) >= max(1, int(top)):
+                break
+        ranked = picked_rows
+    ranked = ranked[: max(1, int(top))]
     specs: list[dict[str, Any]] = []
     for row in ranked:
         spec: dict[str, Any] = {
