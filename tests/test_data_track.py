@@ -410,3 +410,62 @@ def test_candidate_walkforward_hermetic(isolated_home):
     assert broken["evaluated"] == 0
     assert broken["failed"] == 1
     assert broken["failed_rows"] == ["mom_close_5"]
+
+
+def test_layered_long_short_cadence_charges_refresh_days_only():
+    from datetime import date as d
+
+    import polars as pl
+
+    from finaince import sweep as sweep_mod
+
+    codes = [f"6{i:05d}.XSHG" for i in range(30)]
+    days = [d(2024, 1, 1 + i) if i < 31 else d(2024, 2, 1 + i - 31) for i in range(40)]
+    score_rows = []
+    fwd_rows = []
+    for di, day in enumerate(days):
+        for ci, code in enumerate(codes):
+            score_rows.append(
+                {"trade_date": day, "ts_code": code, "_score": float((ci + di) % 30)}
+            )
+            fwd_rows.append(
+                {"trade_date": day, "ts_code": code, "_fwd_ret": ((ci + di) % 30) / 300.0}
+            )
+    scores = pl.DataFrame(score_rows)
+    forwards = pl.DataFrame(fwd_rows)
+    universe = {day: set(codes) for day in days}
+
+    ls_daily, churn_daily = sweep_mod._layered_long_short(scores, forwards, universe)
+    ls_weekly, churn_weekly = sweep_mod._layered_long_short_cadence(
+        scores, forwards, universe, rebalance_every=5
+    )
+    assert len(ls_daily) == len(ls_weekly) == len(days)
+    assert len(churn_daily) == len(days) - 1  # bench core omits the first day
+    assert len(churn_weekly) == len(days)  # cadence variant declares held days explicitly
+    refresh_days = [day for day in days if churn_weekly[day] > 0 or day == days[0]]
+    assert len(refresh_days) == 8
+    assert all(churn_weekly[day] == 0.0 for day in days if day not in refresh_days)
+    assert sum(churn_weekly.values()) < sum(churn_daily.values())
+
+
+def test_candidate_walkforward_rebalance_cadence_hermetic(isolated_home):
+    from finaince import sweep as sweep_mod
+
+    _seed_cache(isolated_home, years=tuple(range(2019, 2025)))
+    grid = {c["name"]: c for c in sweep_mod.build_grid(windows=(5,))}
+    specs = [grid["mom_close_5"], grid["compression_close_5"]]
+    result = sweep_mod.run_candidate_walkforward(specs=specs, rebalance_every=5)
+    assert result["ok"] is True, result.get("error")
+    assert result["provenance"]["rebalance_every"] == 5
+    for row in result["rows"]:
+        assert row["folds"] >= 4
+        weekly_turnover = [
+            f["turnover"] for f in row["fold_detail"] if f.get("turnover") is not None
+        ]
+        assert weekly_turnover
+    daily = sweep_mod.run_candidate_walkforward(specs=[grid["mom_close_5"]])
+    daily_row = next(r for r in daily["rows"] if r["name"] == "mom_close_5")
+    weekly_row = next(r for r in result["rows"] if r["name"] == "mom_close_5")
+    daily_t = [f["turnover"] for f in daily_row["fold_detail"]]
+    weekly_t = [f["turnover"] for f in weekly_row["fold_detail"]]
+    assert sum(weekly_t) <= sum(daily_t)

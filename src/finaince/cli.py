@@ -616,6 +616,7 @@ def wf_candidates_cmd(
     cost_bps: float = typer.Option(5.0, "--cost-bps"),
     no_embargo: bool = typer.Option(False, "--no-embargo"),
     workers: int = typer.Option(1, "--workers", min=1, max=8),
+    rebalance_every: int = typer.Option(1, "--rebalance-every", min=1, help="Refresh LS legs every Nth trading day (screening-layer cadence experiment)"),
 ) -> None:
     """Yearly-fold robustness for the top sweep candidates on the bench PIT core."""
     from finaince import sweep as sweep_mod
@@ -631,6 +632,7 @@ def wf_candidates_cmd(
         cost_bps=cost_bps,
         embargo=not no_embargo,
         workers=workers,
+        rebalance_every=rebalance_every,
     )
     typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
     if not result.get("ok"):

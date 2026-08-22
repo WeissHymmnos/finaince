@@ -259,7 +259,11 @@ top-15 全为 compression 族（close/high/low × 窗口 5–60），十一折�
 
 **诚实定位**：compression 是低换手组合内的调节特征候选，不是独立 alpha；任何引用以上数字必须带「screening layer、5 bps、PIT csi300 v1、2014–2024 十一折」口径。
 
-测试基线：274→276（top_specs fail-closed 排序契约 + candidate walkforward hermetic 全链路含失败行记账）。
+**换手假说检验（同会话追加）**：新增 `_layered_long_short_cadence`（腿每 N 个交易日刷新、持仓日显式零换手条目、仅刷新日计费）+ `run_candidate_walkforward(rebalance_every=N)` + CLI `--rebalance-every`。对照结果：cadence 1→5→10 时 top-15 净 Sharpe 折均值从 −0.30~−0.51 升至 −0.21~−0.33 后不再改善（cadence 10 反而 −0.24~−0.41）。**「换手毒性是唯一死因」被证伪**——即使砍掉大部分成本拖累，毛收益量级本身不足以支撑独立五分位多空；rankIC 排序优势与经济量级是两回事。降频实验同时钉死：任何后续使用该信号的场合都应声明其独立不可交易性。
+
+测试基线：276→278（cadence 只在刷新日落账的直接单测含首日语义差异防回归注释；rebalance cadence hermetic 全链路）。
+
+测试基线：274→276（top_specs fail-closed 排序契约 + candidate walkforward hermetic 全链路含失败行记账）；追加换手假说检验后 276→278。
 
 ---
 

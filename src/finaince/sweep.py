@@ -19,8 +19,10 @@ from typing import Any, Callable
 from finaince.data_track import (
     CACHE_VERSION,
     INDEX_CODE,
+    _daily_ic,
     _factor_artifacts,
     _forward_returns,
+    _layered_long_short,
     _metrics_from_artifacts,
     _scoped_universe,
     _year_dir,
@@ -356,6 +358,68 @@ def top_specs_from_artifact(
     return specs
 
 
+def _layered_long_short_cadence(
+    scores: Any,
+    forwards: Any,
+    universe_by_day: dict[Any, set[str]],
+    *,
+    n_groups: int = 5,
+    rebalance_every: int = 1,
+) -> tuple[list[tuple[Any, float]], dict[Any, float]]:
+    """Quintile LS with legs refreshed every Nth trading day.
+
+    Screening-layer experiment for the cadence/turnover question; same churn
+    definition as the bench core, charged on refresh days only. Held days get
+    explicit zero-churn entries so per-day cost application stays honest.
+    """
+    joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+    days = sorted(d for d in set(joined["trade_date"].to_list()) if d in universe_by_day)
+    series: list[tuple[Any, float]] = []
+    turnover_by_day: dict[Any, float] = {}
+    prev_legs: tuple[set[str], set[str]] | None = None
+    since_refresh = 0
+    for day in days:
+        members = universe_by_day[day]
+        group = joined.filter(joined["trade_date"] == day)
+        group = group.filter(group["ts_code"].is_in(sorted(members)))
+        if group.height < n_groups * 4:
+            prev_legs = None
+            continue
+        if prev_legs is not None:
+            long_ret = (
+                group.filter(group["ts_code"].is_in(sorted(prev_legs[0])))["_fwd_ret"].mean()
+                or 0.0
+            )
+            short_ret = (
+                group.filter(group["ts_code"].is_in(sorted(prev_legs[1])))["_fwd_ret"].mean()
+                or 0.0
+            )
+        else:
+            long_ret = short_ret = 0.0
+        ls = float(long_ret - short_ret)
+        since_refresh += 1
+        if prev_legs is None or since_refresh >= max(1, int(rebalance_every)):
+            ranked = group.with_columns(group["_score"].rank(method="ordinal").alias("_rk"))
+            bucket = (ranked["_rk"] - 1) * n_groups // ranked.height
+            ranked = ranked.with_columns(bucket.alias("_bucket"))
+            long_leg = set(ranked.filter(ranked["_bucket"] == 0)["ts_code"].to_list())
+            short_leg = set(
+                ranked.filter(ranked["_bucket"] == n_groups - 1)["ts_code"].to_list()
+            )
+            if prev_legs is not None:
+                churn_long = len(long_leg ^ prev_legs[0]) / max(len(long_leg), 1)
+                churn_short = len(short_leg ^ prev_legs[1]) / max(len(short_leg), 1)
+                turnover_by_day[day] = (churn_long + churn_short) / 2.0
+            else:
+                turnover_by_day[day] = 0.0
+            prev_legs = (long_leg, short_leg)
+            since_refresh = 0
+        else:
+            turnover_by_day[day] = 0.0
+        series.append((day, ls))
+    return series, turnover_by_day
+
+
 def _candidate_fold_chunk(
     payload: tuple[list[dict[str, Any]], dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -376,6 +440,22 @@ def _candidate_fold_chunk(
     forwards = _forward_returns(frame)
     panel = frame.sort(["ts_code", "trade_date"])
     years = range(int(cfg["start_year"]), int(cfg["end_year"]) + 1)
+    cadence = max(1, int(cfg.get("rebalance_every", 1)))
+
+    def _fold_metrics(
+        scores: Any, scoped: dict[Any, set[str]], cost_bps: float
+    ) -> dict[str, Any]:
+        ic_vals = _daily_ic(scores, forwards, scoped, spearman=False)
+        rank_vals = _daily_ic(scores, forwards, scoped, spearman=True)
+        if cadence > 1:
+            ls, churn = _layered_long_short_cadence(
+                scores, forwards, scoped, rebalance_every=cadence
+            )
+        else:
+            ls, churn = _layered_long_short(scores, forwards, scoped)
+        return _metrics_from_artifacts(
+            {"ic_vals": ic_vals, "rank_vals": rank_vals, "ls": (ls, churn)}, cost_bps
+        )
 
     def _mean_std(vals: list[float]) -> tuple[float | None, float | None]:
         if not vals:
@@ -408,9 +488,7 @@ def _candidate_fold_chunk(
                     date(year, 12, 31),
                     embargo=cfg["embargo"],
                 )
-                metrics = _metrics_from_artifacts(
-                    _factor_artifacts(scores, forwards, scoped), cfg["cost_bps"]
-                )
+                metrics = _fold_metrics(scores, scoped, cfg["cost_bps"])
                 if "insufficient_days" in metrics:
                     continue
                 fold_rows.append({"year": year, **metrics})
@@ -449,6 +527,7 @@ def run_candidate_walkforward(
     cost_bps: float = 5.0,
     embargo: bool = True,
     workers: int = 1,
+    rebalance_every: int = 1,
 ) -> dict[str, Any]:
     """Per-calendar-year folds over screening candidates on the bench PIT core.
 
@@ -456,10 +535,13 @@ def run_candidate_walkforward(
     compression family) actually lives before anyone may quote it. Same
     evaluation core as run_bench/run_sweep; output stays exploratory —
     citable claims still require run_bench + the full gate chain.
+    ``rebalance_every > 1`` switches the LS legs to a held-legs cadence
+    (screening-layer experiment; churn charged on refresh days only).
     """
     provenance: dict[str, Any] = {
         "cost_bps": cost_bps,
         "embargo_last_day": embargo,
+        "rebalance_every": max(1, int(rebalance_every)),
         "candidates": len(specs),
         "universe_source": "point_in_time",
         "index_code": INDEX_CODE,
@@ -496,6 +578,7 @@ def run_candidate_walkforward(
         "last_year": last_year,
         "start_year": first_year,
         "end_year": last_year,
+        "rebalance_every": max(1, int(rebalance_every)),
     }
 
     all_rows: list[dict[str, Any]] = []
@@ -531,7 +614,7 @@ def run_candidate_walkforward(
         "# 候选逐年折叠稳健性（screening layer）",
         "",
         f"- candidates: {len(specs)}, ok {len(ok_rows)}, failed {len(failed)}",
-        f"- folds: {first_year}→{last_year} per calendar year; cost {cost_bps} bps; embargo {embargo}",
+        f"- folds: {first_year}→{last_year} per calendar year; cost {cost_bps} bps; embargo {embargo}; rebalance_every {max(1, int(rebalance_every))}",
         "- evaluation core identical to run_bench (PIT); exploratory numbers only",
         "",
         "| # | name | folds | rank_ic mean±std | positive% | sharpe_net mean±std |",
