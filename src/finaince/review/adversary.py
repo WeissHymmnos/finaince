@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from finaince.catalog.store import FactorCatalog
@@ -85,12 +86,16 @@ def adversarial_review(promotion_id: str, *, tol_rel: float = 0.05, tol_abs: flo
     checks = []
     
     try:
+        child_env = os.environ.copy()
+        src_dir = str(Path(__file__).resolve().parents[2])
+        existing_pp = child_env.get("PYTHONPATH", "")
+        child_env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pp}" if existing_pp else src_dir
         proc = subprocess.run(
             [sys.executable, "-c", _SNIPPET, json.dumps(config)],
             capture_output=True,
             text=True,
             timeout=120,
-            env=os.environ.copy(),
+            env=child_env,
         )
         if proc.returncode != 0:
             checks.append({"name": "reexec_ok", "ok": False, "detail": "adversary_child_error"})

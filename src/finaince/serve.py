@@ -308,18 +308,27 @@ def create_app() -> Any:
         backend = str(body.get("data_backend") or body.get("backend") or "auto")
         if backend == "auto":
             backend = resolve_data_source()
+        try:
+            cost_bps = float(body.get("cost_bps") or 0.0)
+        except (TypeError, ValueError):
+            cost_bps = 0.0
         req = EvalRequest(
             expression=str(body.get("expression") or ""),
             dialect=str(body.get("dialect") or "repro_polars"),
             data_backend=backend,
+            universe=str(body.get("universe") or "local_panel"),
             start=body.get("start"),
             end=body.get("end"),
+            cost_bps=cost_bps,
         )
         result = await asyncio.to_thread(evaluate, req)
+        metrics = dict(result.metrics or {})
+        if result.ok and "cost_bps" not in metrics:
+            metrics["cost_bps"] = cost_bps
         return {
             "ok": result.ok,
             "dialect": result.dialect,
-            "metrics": result.metrics,
+            "metrics": metrics,
             "error": result.error,
             "translatable": result.translatable,
             "alt_text": result.alt_text,

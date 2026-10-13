@@ -111,11 +111,33 @@ def _train_gbm_head(
             y_train = y[:t]
             X_test = X[t:t+1]
             y_test = y[t]
-            
-            model = ModelClass(**model_kwargs)
-            model.fit(X_train, y_train)
-            pred = model.predict(X_test)[0]
-            
+
+            try:
+                model = ModelClass(**model_kwargs)
+                model.fit(X_train, y_train)
+                pred = float(model.predict(X_test)[0])
+            except Exception as inner_exc:
+                if (
+                    backend == "lightgbm"
+                    and "scikit-learn" in str(inner_exc)
+                    and hasattr(lightgbm, "train")
+                ):
+                    ds = lightgbm.Dataset(X_train, label=y_train, free_raw_data=False)
+                    bst = lightgbm.train(
+                        {
+                            "objective": "regression",
+                            "max_depth": 3,
+                            "learning_rate": 0.05,
+                            "min_data_in_leaf": max(1, min(5, len(X_train) // 3)),
+                            "verbose": -1,
+                        },
+                        ds,
+                        num_boost_round=20,
+                    )
+                    pred = float(bst.predict(X_test)[0])
+                else:
+                    raise
+
             preds.append(pred)
             realized.append(y_test)
             pred_keys.append(y_keys[t])

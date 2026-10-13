@@ -77,8 +77,13 @@ def test_layout_nav_maps_to_shipped_page_calls() -> None:
         "/ops": (FRONTEND / "src" / "pages" / "AdminPage.tsx").read_text(),
     }
     for route, (_method, path) in NAV_HTTP.items():
-        assert f'to: "{route}"' in layout or f'to="{route}"' in layout, route
-        assert f'path="{route}"' in app, route
+        assert (
+            f'to: "{route}"' in layout
+            or f"to: '{route}'" in layout
+            or f'to="{route}"' in layout
+            or f"to='{route}'" in layout
+        ), route
+        assert f'path="{route}"' in app or f"path='{route}'" in app, route
         assert path.split("?")[0] in pages[route] or path.replace("/api/", "") in pages[route] or (
             "api." in pages[route] or "deskFetch" in pages[route]
         ), (route, path)

@@ -10,13 +10,22 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from finaince.compat import current_pgid, pid_alive, popen_detached, terminate_process_tree
+from finaince.compat import (
+    current_pgid,
+    pid_alive,
+    popen_detached,
+    reap_all_zombies,
+    terminate_process_tree,
+)
 from finaince.db import ensure_columns, ensure_database_initialized, managed_connection
+
+_SUBMIT_LOCK = threading.Lock()
 
 _JOBS_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -225,6 +234,7 @@ def max_concurrent_jobs() -> int:
 
 def active_jobs(kind: str | None = None) -> list[dict[str, Any]]:
     """Running/queued rows (SQL-filtered, status index) with dead-child reaping."""
+    reap_all_zombies()
     sql = (
         "SELECT id, kind, status, error, engine_run_id, pid, created_at FROM jobs "
         "WHERE status IN ('running','queued')"
@@ -268,26 +278,27 @@ def start_process(kind: str, payload: dict[str, Any], argv: list[str]) -> dict[s
     write done/error onto the same row so ``GET /jobs/{id}`` can stop.
     WS-C: duplicate-payload rejection + FINAINCE_MAX_JOBS concurrency cap.
     """
-    guard = can_submit(kind, payload_key=payload.get("dedup_key") if isinstance(payload, dict) else None)
-    if not guard.get("ok"):
-        return guard
-    running = active_jobs()
-    if len(running) >= max_concurrent_jobs():
-        return {
-            "ok": False,
-            "error": "max_jobs_reached",
-            "limit": max_concurrent_jobs(),
-            "running_job_ids": [job["id"] for job in running],
-        }
-    job_id = uuid.uuid4().hex
-    now = _now()
-    with _connect() as conn:
-        conn.execute(
-            "INSERT INTO jobs (id, kind, status, payload_json, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (job_id, kind, "queued", json.dumps(payload, default=str), now, now),
-        )
-        conn.commit()
+    with _SUBMIT_LOCK:
+        guard = can_submit(kind, payload_key=payload.get("dedup_key") if isinstance(payload, dict) else None)
+        if not guard.get("ok"):
+            return guard
+        running = active_jobs()
+        if len(running) >= max_concurrent_jobs():
+            return {
+                "ok": False,
+                "error": "max_jobs_reached",
+                "limit": max_concurrent_jobs(),
+                "running_job_ids": [job["id"] for job in running],
+            }
+        job_id = uuid.uuid4().hex
+        now = _now()
+        with _connect() as conn:
+            conn.execute(
+                "INSERT INTO jobs (id, kind, status, payload_json, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (job_id, kind, "queued", json.dumps(payload, default=str), now, now),
+            )
+            conn.commit()
     env = os.environ.copy()
     env["FINAINCE_JOB_ID"] = job_id
     try:
@@ -340,6 +351,8 @@ def cancel(job_id: str) -> dict[str, Any]:
 
 
 def get_job(job_id: str, *, reap: bool = True) -> dict[str, Any] | None:
+    if reap:
+        reap_all_zombies()
     data = _load_job(job_id)
     if not data:
         return None

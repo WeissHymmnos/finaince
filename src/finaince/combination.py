@@ -15,21 +15,37 @@ from typing import Any
 MIN_COVERAGE_RATIO = 0.6
 
 
-def _series(returns_by_factor: dict[str, dict[str, float]], dates: list[str]) -> dict[str, list[float]]:
-    table: dict[str, list[float]] = {}
+def _series(returns_by_factor: dict[str, dict[str, float]], dates: list[str]) -> dict[str, list[float | None]]:
+    table: dict[str, list[float | None]] = {}
     for fid, series in returns_by_factor.items():
-        table[fid] = [float(series.get(day, 0.0)) for day in dates]
+        row: list[float | None] = []
+        for day in dates:
+            raw = series.get(day)
+            if raw is None:
+                row.append(None)
+                continue
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                row.append(None)
+                continue
+            row.append(val if math.isfinite(val) else None)
+        table[fid] = row
     return table
 
 
-def _rolling_inverse_vol_weights(rows: dict[str, list[float]], *, lookback: int) -> list[dict[str, float]]:
+def _rolling_inverse_vol_weights(rows: dict[str, list[float | None]], *, lookback: int) -> list[dict[str, float]]:
     """Weight row per day computed from information strictly before that day."""
     factor_ids = sorted(rows)
     weights_history: list[dict[str, float]] = []
-    for day_index in range(len(next(iter(rows.values())))):
+    n_days = len(next(iter(rows.values()))) if rows else 0
+    for day_index in range(n_days):
         inv_vols: dict[str, float] = {}
         for fid in factor_ids:
-            window = rows[fid][max(0, day_index - lookback) : day_index]
+            if rows[fid][day_index] is None:
+                continue
+            raw_window = rows[fid][max(0, day_index - lookback) : day_index]
+            window = [float(x) for x in raw_window if x is not None and math.isfinite(float(x))]
             if len(window) < 5:
                 continue
             mean = sum(window) / len(window)
@@ -82,15 +98,17 @@ def combine_daily(
     prev_active: dict[str, float] | None = None
     for index, day in enumerate(dates):
         active = weights_history[index]
-        gross = sum(w * rows[fid][index] for fid, w in active.items())
-        if prev_active is not None and active:
+        if not active:
+            continue
+        gross = sum(w * float(rows[fid][index] or 0.0) for fid, w in active.items())
+        if prev_active is not None:
             churn = _turnover(prev_active, active)
             turnovers.append(churn)
             gross -= (cost_bps / 10000.0) * churn * 2.0
         prev_active = active
         combo[day] = gross
 
-    values = [combo[d] for d in dates]
+    values = list(combo.values())
     if len(values) < 20:
         return {"ok": False, "reason": "too_short"}
     from finaince.domain.scoring import max_drawdown, sharpe_ratio

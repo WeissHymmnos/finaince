@@ -102,7 +102,7 @@ def _originality_corpus(exclude_id: str | None = None) -> list[tuple[str, str]]:
         import json
         from pathlib import Path
 
-        zoo = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "alpha_seed_zoo.json"
+        zoo = Path(__file__).resolve().parents[1] / "data" / "alpha_seed_zoo.json"
         if not zoo.exists():
             for candidate in Path(__file__).resolve().parents:
                 probe = candidate / "tests" / "fixtures" / "alpha_seed_zoo.json"

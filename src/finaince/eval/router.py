@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,7 @@ _OPERATORS_MTIME: int | None = None
 _PANEL_CACHE: dict[tuple, Any] = {}
 _PANEL_CACHE_STATS: dict[str, int] = {"hits": 0, "misses": 0}
 _PANEL_CACHE_INSTALLED = False
+_PANEL_CACHE_LOCK = threading.Lock()
 
 
 def _panel_cache_disabled() -> bool:
@@ -89,15 +91,17 @@ def _install_panel_cache() -> bool:
             getattr(end, "isoformat", lambda: str(end))(),
             _local_panel_identity(),
         )
-        hit = _PANEL_CACHE.get(key)
-        if hit is not None:
-            _PANEL_CACHE_STATS["hits"] += 1
-            return hit.clone()
-        _PANEL_CACHE_STATS["misses"] += 1
+        with _PANEL_CACHE_LOCK:
+            hit = _PANEL_CACHE.get(key)
+            if hit is not None:
+                _PANEL_CACHE_STATS["hits"] += 1
+                return hit.clone()
+            _PANEL_CACHE_STATS["misses"] += 1
         frame = original(self, universe, start, end)
-        if len(_PANEL_CACHE) >= 8:
-            _PANEL_CACHE.clear()
-        _PANEL_CACHE[key] = frame.clone()
+        with _PANEL_CACHE_LOCK:
+            if len(_PANEL_CACHE) >= 8:
+                _PANEL_CACHE.clear()
+            _PANEL_CACHE[key] = frame.clone()
         return frame
 
     DataLoader.load_price_data = cached_load

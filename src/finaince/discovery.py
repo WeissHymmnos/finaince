@@ -34,8 +34,12 @@ def _seed_zoo_corpus() -> list[tuple[str, str]]:
     import json
     from pathlib import Path
 
-    for base in (Path(__file__).resolve().parents[3], *Path(__file__).resolve().parents):
-        probe = base / "tests" / "fixtures" / "alpha_seed_zoo.json"
+    packaged = Path(__file__).resolve().parent / "data" / "alpha_seed_zoo.json"
+    candidates = [
+        packaged,
+        *(base / "tests" / "fixtures" / "alpha_seed_zoo.json" for base in (Path(__file__).resolve().parents[3], *Path(__file__).resolve().parents)),
+    ]
+    for probe in candidates:
         if probe.exists():
             try:
                 data = json.loads(probe.read_text())
@@ -106,27 +110,82 @@ def reflect_sign(metrics: dict[str, Any]) -> dict[str, Any] | None:
     """WS-C sign-reflection: mirrored row for a statistically significant negative-IC factor.
 
     For a dollar-neutral cross-sectional factor the negated signal flips IC /
-    RankIC / Sharpe / ICIR signs exactly and keeps turnover and drawdown
-    magnitudes unchanged. Returns None when reflection is not justified
-    (missing metrics or t-stat below 3) — never guesses.
+    RankIC / Sharpe / ICIR signs, negates the daily return series, and recomputes
+    maximum drawdown on the inverted equity curve. Returns None when reflection
+    is not justified (missing metrics or t-stat below 3) — never guesses.
     """
-    ic = metrics.get("ic")
+    nested = metrics.get("metrics") if isinstance(metrics.get("metrics"), dict) else {}
+    ic = metrics.get("ic", nested.get("ic"))
     if not isinstance(ic, (int, float)) or math.isfinite(ic) is False or ic >= 0:
         return None
-    ic_ir = metrics.get("ic_ir")
-    returns = metrics.get("returns")
+    ic_ir = metrics.get("ic_ir", metrics.get("icir", nested.get("ic_ir", nested.get("icir"))))
+    returns = metrics.get("returns") if isinstance(metrics.get("returns"), dict) else (
+        metrics.get("daily_returns") if isinstance(metrics.get("daily_returns"), dict) else (
+            nested.get("returns") if isinstance(nested.get("returns"), dict) else nested.get("daily_returns")
+        )
+    )
     if not isinstance(ic_ir, (int, float)) or not isinstance(returns, dict) or not returns:
         return None
-    from finaince.domain.scoring import ic_t_stat
+    from finaince.domain.scoring import ic_t_stat, max_drawdown
 
     t_stat = ic_t_stat(ic_ir, len(returns))
     if t_stat is None or abs(t_stat) < 3.0:
         return None
     mirror = dict(metrics)
-    for key in ("ic", "rank_ic", "sharpe", "ic_ir", "icir", "perf_metric", "selection_score"):
+    flip_keys = (
+        "ic",
+        "rank_ic",
+        "ic_mean",
+        "sharpe",
+        "sharpe_ratio",
+        "sharpe_net",
+        "ic_ir",
+        "icir",
+        "rank_icir",
+        "annualized_return",
+        "annual_return",
+        "perf_metric",
+        "selection_score",
+    )
+    for key in flip_keys:
         value = mirror.get(key)
-        if isinstance(value, (int, float)) and math.isfinite(value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
             mirror[key] = -value
+
+    neg_returns: dict[str, float] = {}
+    for k, v in returns.items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)):
+            neg_returns[str(k)] = -float(v)
+
+    if isinstance(mirror.get("returns"), dict):
+        mirror["returns"] = dict(neg_returns)
+    if isinstance(mirror.get("daily_returns"), dict):
+        mirror["daily_returns"] = dict(neg_returns)
+
+    new_mdd = max_drawdown(list(neg_returns.values())) if neg_returns else None
+    if new_mdd is not None:
+        mirror["max_drawdown"] = new_mdd
+
+    if isinstance(mirror.get("metrics"), dict):
+        sub = dict(mirror["metrics"])
+        for key in flip_keys:
+            val = sub.get(key)
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(val):
+                sub[key] = -val
+        if isinstance(sub.get("returns"), dict):
+            sub["returns"] = dict(neg_returns)
+        if isinstance(sub.get("daily_returns"), dict):
+            sub["daily_returns"] = dict(neg_returns)
+        if new_mdd is not None:
+            sub["max_drawdown"] = new_mdd
+        mirror["metrics"] = sub
+
+    for expr_key in ("code", "expression", "expr", "formula"):
+        expr_val = mirror.get(expr_key)
+        if isinstance(expr_val, str) and expr_val.strip():
+            stripped = expr_val.strip()
+            mirror[expr_key] = stripped[2:-1] if (stripped.startswith("-(") and stripped.endswith(")")) else f"-({stripped})"
+
     mirror["sign_reflected"] = True
     mirror["reflected_from_t"] = round(t_stat, 3)
     hypothesis = mirror.get("hypothesis")
@@ -169,7 +228,7 @@ def cull_factor_pool(results_list: list[dict[str, Any]]) -> list[dict[str, Any]]
     return list(pool)
 
 
-def run_swarm(args: list[str] | None = None) -> dict[str, Any]:
+def run_swarm(args: list[str] | None = None, *, timeout: float | None = None) -> dict[str, Any]:
     """Dispatch to the shipped aiminer manager swarm.
 
     The 3.12 platform env cannot import LangGraph; the live swarm runs under
@@ -204,12 +263,14 @@ def run_swarm(args: list[str] | None = None) -> dict[str, Any]:
     env["AIMINER_RESULTS_DIR"] = str(cfg.aiminer_results)
     env["AIMINER_DATA_DIR"] = str(cfg.home / "aiminer" / "data")
     inject_llm_env(resolve_llm())
+    swarm_timeout = float(timeout if timeout is not None else (os.environ.get("FINAINCE_SWARM_TIMEOUT", "1800") or 1800))
     completed = subprocess.run(
         [py, "-m", "aiminer.manager", *argv],
         env=env,
         text=True,
         capture_output=True,
         cwd=str(cfg.home),
+        timeout=swarm_timeout,
     )
     tail = ((completed.stdout or "") + "\n" + (completed.stderr or ""))[-4000:]
     if completed.returncode != 0:

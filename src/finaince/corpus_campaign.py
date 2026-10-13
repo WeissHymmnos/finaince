@@ -52,7 +52,9 @@ def save_manifest(manifest: dict[str, Any]) -> None:
 
 def _atomic_write_json(target: Path, payload: dict[str, Any]) -> None:
     """tmp + os.replace: a crash never leaves a half-written JSON behind."""
-    tmp = target.with_suffix(f"{target.suffix}.{os.getpid()}.tmp")
+    import uuid
+
+    tmp = target.with_suffix(f"{target.suffix}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     tmp.write_text(json.dumps(payload, indent=1, ensure_ascii=False))
     os.replace(tmp, target)
 

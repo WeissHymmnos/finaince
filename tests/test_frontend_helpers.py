@@ -77,9 +77,13 @@ def test_frontend_routes_controls_and_non_ai_stylesheet() -> None:
     assert "ok === false" in agent and "deskFetch" in agent
     assert "backdrop-filter" not in styles.lower()
     assert "linear-gradient" not in styles
-    font_line = next(line for line in styles.splitlines() if "font-family" in line)
-    assert "Inter" not in font_line and "Geist" not in font_line
-    assert "IBM Plex Sans" in font_line
+    import re
+
+    font_match = re.search(r"font-family\s*:\s*([^;]+);", styles)
+    assert font_match is not None
+    font_decl = font_match.group(1)
+    assert "Inter" not in font_decl and "Geist" not in font_decl
+    assert "IBM Plex Sans" in font_decl
 
 
 def test_workbench_aiminer_routes_do_not_404(isolated_home: Path) -> None:

@@ -225,9 +225,9 @@ def test_frontend_default_route_is_catalog() -> None:
     assert 'path="/reproduce" element={<ReproducePage />}' in app_src
     assert 'path="/agent" element={<AgentPage />}' in app_src
     assert 'path="/runs" element={<SwarmRunsPage />}' in app_src
-    assert 'label: "Catalog"' in layout
-    assert 'label: "Review"' in layout
-    assert 'label: "Reproduce"' in layout
+    assert 'label: "Catalog"' in layout or "label: 'Catalog'" in layout
+    assert 'label: "Review"' in layout or "label: 'Review'" in layout
+    assert 'label: "Reproduce"' in layout or "label: 'Reproduce'" in layout
     assert "FinAlpha" in layout
     assert (fe / "pages" / "ReviewPage.tsx").is_file()
     assert (fe / "pages" / "ReproducePage.tsx").is_file()

@@ -300,7 +300,7 @@ def sync_cache(start_year: int, end_year: int) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{year}: {exc}")
     comps: list[str] = []
-    for day in rebalance_dates(date(start_year, 1, 1), date(end_year, 12, 31)):
+    for day in rebalance_dates(date(start_year - 1, 11, 1), date(end_year, 12, 31)):
         try:
             fetch_components_live(day)
             comps.append(day.isoformat())
@@ -310,24 +310,26 @@ def sync_cache(start_year: int, end_year: int) -> dict[str, Any]:
     return {"ok": not errors, "years_done": done, "component_dates": comps, "errors": errors}
 
 
-def _factor_scores(frame: Any, name: str) -> Any:
+def _factor_scores(frame: Any, name: str, *, _presorted: bool = False) -> Any:
     import polars as pl
 
-    panel = frame.sort(["ts_code", "trade_date"])
+    panel = frame if _presorted else frame.sort(["ts_code", "trade_date"])
     if name == "rank_delta_20":
         raw = panel.with_columns(
-            (pl.col("close") - pl.col("close").shift(20).over("ts_code")).alias("_raw")
+            (pl.col("close") - pl.col("close").shift(20).over("ts_code")).fill_nan(None).alias("_raw")
         )
     elif name == "reversal_5":
         raw = panel.with_columns(
-            -(pl.col("close") - pl.col("close").shift(5).over("ts_code")).alias("_raw")
+            (-(pl.col("close") - pl.col("close").shift(5).over("ts_code"))).fill_nan(None).alias("_raw")
         )
     elif name == "vp_shock":
         raw = panel.with_columns(
             (
                 pl.col("volume")
                 / (pl.col("volume").shift(1).rolling_mean(20).over("ts_code") + 1e-12)
-            ).alias("_raw")
+            )
+            .fill_nan(None)
+            .alias("_raw")
         )
     else:
         raise ValueError(f"unknown seed factor: {name}")
@@ -337,15 +339,52 @@ def _factor_scores(frame: Any, name: str) -> Any:
     return ranked.select(["trade_date", "ts_code", "_score"])
 
 
-def _forward_returns(frame: Any) -> Any:
+LIMIT_MOVE_THRESHOLD = 0.095
+
+
+def _untradable_next_day_expr(columns: list[str]) -> Any:
+    """Next-bar tradability: suspended (no volume) or one-word limit bar (ISSUE-R2-02 / [P0-02]).
+
+    A signal on day t is realised on t+1. If t+1 is suspended, or prints a
+    one-word limit move (open == high == low == close with |move| >= ~10%),
+    the position cannot be entered/exited at the quoted price, so that
+    forward return is withheld rather than credited as paper alpha.
+    """
     import polars as pl
 
-    panel = frame.sort(["ts_code", "trade_date"])
+    have = set(columns)
+    conds: list[Any] = []
+    if "volume" in have:
+        conds.append(pl.col("volume").shift(-1).fill_null(0.0) <= 0.0)
+    if {"open", "high", "low"} <= have:
+        n_close = pl.col("close").shift(-1)
+        flat_bar = ((pl.col("high").shift(-1) - pl.col("low").shift(-1)).abs() < 1e-8) & (
+            (pl.col("open").shift(-1) - n_close).abs() < 1e-8
+        )
+        big_move = (n_close / pl.col("close") - 1.0).abs() >= LIMIT_MOVE_THRESHOLD
+        conds.append(flat_bar & big_move)
+    if not conds:
+        return None
+    out = conds[0]
+    for extra in conds[1:]:
+        out = out | extra
+    return out.fill_null(False)
+
+
+def _forward_returns(frame: Any, *, _presorted: bool = False) -> Any:
+    import polars as pl
+
+    panel = frame if _presorted else frame.sort(["ts_code", "trade_date"])
+    untradable = _untradable_next_day_expr(list(panel.columns))
+    valid = pl.col("close") > 1e-6
+    if untradable is not None:
+        valid = valid & ~untradable
     return panel.with_columns(
-        pl.when(pl.col("close") > 1e-6)
+        pl.when(valid)
         .then(pl.col("close").shift(-1) / pl.col("close") - 1.0)
         .otherwise(None)
         .over("ts_code")
+        .fill_nan(None)
         .alias("_fwd_ret")
     ).select(["trade_date", "ts_code", "_fwd_ret"])
 
@@ -421,7 +460,11 @@ def _daily_ic(
     if _prejoined is not None:
         filtered = _prejoined
     else:
-        joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+        joined = (
+            scores.join(forwards, on=["trade_date", "ts_code"], how="inner")
+            .fill_nan(None)
+            .drop_nulls()
+        )
         if joined.is_empty():
             return []
         u_df = _make_universe_frame(joined, universe_by_day)
@@ -459,7 +502,7 @@ def _daily_ic(
         .sort("trade_date")
         .select((pl.col("cov") / (pl.col("sx") * pl.col("sy"))).alias("ic"))
     )
-    return agg["ic"].to_list()
+    return [v for v in agg["ic"].to_list() if v is not None and math.isfinite(v)]
 
 
 def _layered_long_short(
@@ -484,15 +527,19 @@ def _layered_long_short(
             all_days = _all_days
         else:
             u_days_set = _universe_days_aligned(filtered, universe_by_day)
-            all_days = sorted(d for d in set(filtered["trade_date"].to_list()) if d in u_days_set)
+            all_days = sorted(d for d in filtered["trade_date"].unique().to_list() if d in u_days_set)
     else:
-        joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+        joined = (
+            scores.join(forwards, on=["trade_date", "ts_code"], how="inner")
+            .fill_nan(None)
+            .drop_nulls()
+        )
         if joined.is_empty():
             return [], {}
         u_df = _make_universe_frame(joined, universe_by_day)
         filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
         u_days_set = _universe_days_aligned(joined, universe_by_day)
-        all_days = sorted(d for d in set(joined["trade_date"].to_list()) if d in u_days_set)
+        all_days = sorted(d for d in joined["trade_date"].unique().to_list() if d in u_days_set)
 
     need = n_groups * 4
 
@@ -623,16 +670,25 @@ def _scoped_universe(
 
 
 def _factor_artifacts(
-    scores: Any, forwards: Any, scoped_universe: dict[Any, set[str]]
+    scores: Any,
+    forwards: Any,
+    scoped_universe: dict[Any, set[str]],
+    *,
+    _u_df: Any = None,
+    _u_days_set: set[Any] | None = None,
 ) -> dict[str, Any]:
-    joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+    joined = (
+        scores.join(forwards, on=["trade_date", "ts_code"], how="inner")
+        .fill_nan(None)
+        .drop_nulls()
+    )
     if joined.is_empty():
         return {
             "ic_vals": [],
             "rank_vals": [],
             "ls": ([], {}),
         }
-    u_df = _make_universe_frame(joined, scoped_universe)
+    u_df = _u_df if _u_df is not None else _make_universe_frame(joined, scoped_universe)
     filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
     if filtered.is_empty():
         return {
@@ -640,8 +696,8 @@ def _factor_artifacts(
             "rank_vals": [],
             "ls": ([], {}),
         }
-    u_days_set = _universe_days_aligned(joined, scoped_universe)
-    all_days = sorted(d for d in set(joined["trade_date"].to_list()) if d in u_days_set)
+    u_days_set = _u_days_set if _u_days_set is not None else _universe_days_aligned(joined, scoped_universe)
+    all_days = sorted(d for d in joined["trade_date"].unique().to_list() if d in u_days_set)
     return {
         "ic_vals": _daily_ic(scores, forwards, scoped_universe, spearman=False, _prejoined=filtered),
         "rank_vals": _daily_ic(scores, forwards, scoped_universe, spearman=True, _prejoined=filtered),
@@ -662,14 +718,14 @@ def _metrics_from_artifacts(artifacts: dict[str, Any], cost_bps: float) -> dict[
     }
 
 
-def _neutralize_scores(frame: Any, name: str, controls: list[str]) -> Any:
+def _neutralize_scores(frame: Any, name: str, controls: list[str], *, _presorted: bool = False) -> Any:
     """Cross-sectional OLS residuals of seed ``name`` against control seeds."""
     import polars as pl
 
-    joined = _factor_scores(frame, name)
+    joined = _factor_scores(frame, name, _presorted=_presorted)
     for i, ctrl in enumerate(controls):
         joined = joined.join(
-            _factor_scores(frame, ctrl).rename({"_score": f"_c{i}"}),
+            _factor_scores(frame, ctrl, _presorted=_presorted).rename({"_score": f"_c{i}"}),
             on=["trade_date", "ts_code"],
             how="inner",
         )
@@ -783,15 +839,27 @@ def run_bench(
     provenance["neutralization"] = neutralization
     provenance["neutralized"] = neutralization == "industry"
 
+    frame = frame.sort(["ts_code", "trade_date"])
     suspended = suspensions_map()
     universe_by_day_all: dict[Any, set[str]] = {}
-    for day in set(frame["trade_date"].to_list()):
+    for day in frame["trade_date"].unique().to_list():
         members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
 
-    forwards = _forward_returns(frame)
+    forwards = _forward_returns(frame, _presorted=True)
     from finaince.eval.pit_core import TURNOVER_MODEL, score_expression
+
+    # Precompute scoped universe and DataFrame per window once across all factors
+    window_cache: dict[str, tuple[dict[Any, set[str]], Any, set[Any], int]] = {}
+    for label, (w_start, w_end) in windows.items():
+        scoped = _scoped_universe(universe_by_day_all, w_start, w_end, embargo=embargo)
+        u_df = _make_universe_frame(forwards, scoped)
+        u_days_set = _universe_days_aligned(forwards, scoped)
+        names_set: set[str] = set()
+        for members in scoped.values():
+            names_set.update(members)
+        window_cache[label] = (scoped, u_df, u_days_set, len(names_set))
 
     table: list[dict[str, Any]] = []
     artifacts_by_factor: dict[str, dict[str, dict[str, Any]]] = {}
@@ -805,9 +873,9 @@ def run_bench(
             except ValueError as exc:
                 return {"ok": False, "error": str(exc), "provenance": provenance}
         elif neutralize_vs and neutralization != "skipped_no_industry":
-            scores = _neutralize_scores(frame, name, [c for c in controls if c != name])
+            scores = _neutralize_scores(frame, name, [c for c in controls if c != name], _presorted=True)
         else:
-            scores = _factor_scores(frame, name)
+            scores = _factor_scores(frame, name, _presorted=True)
         row: dict[str, Any] = {
             "factor": name,
             "expression": expr,
@@ -816,14 +884,11 @@ def run_bench(
         }
         factor_arts: dict[str, dict[str, Any]] = {}
         for label, (w_start, w_end) in windows.items():
-            scoped = _scoped_universe(universe_by_day_all, w_start, w_end, embargo=embargo)
-            arts = _factor_artifacts(scores, forwards, scoped)
+            scoped, u_df, u_days_set, n_names = window_cache[label]
+            arts = _factor_artifacts(scores, forwards, scoped, _u_df=u_df, _u_days_set=u_days_set)
             factor_arts[label] = arts
             m = _metrics_from_artifacts(arts, cost_bps)
-            names: set[str] = set()
-            for members in scoped.values():
-                names.update(members)
-            m["n_names"] = len(names)
+            m["n_names"] = n_names
             m["n_days"] = m.get("days")
             m["cost_bps"] = cost_bps
             m["turnover_model"] = TURNOVER_MODEL
@@ -917,20 +982,21 @@ def run_walkforward(
             return {"ok": False, "error": f"unknown neutralize_vs seeds: {invalid}", "provenance": provenance}
         controls = list(neutralize_vs)
 
+    frame = frame.sort(["ts_code", "trade_date"])
     suspended = suspensions_map()
     universe_by_day_all: dict[Any, set[str]] = {}
-    for day in set(frame["trade_date"].to_list()):
+    for day in frame["trade_date"].unique().to_list():
         members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
-    forwards = _forward_returns(frame)
+    forwards = _forward_returns(frame, _presorted=True)
 
     rows: list[dict[str, Any]] = []
     for name, expression in SEED_FACTORS:
         if neutralize_vs:
-            scores = _neutralize_scores(frame, name, [c for c in controls if c != name])
+            scores = _neutralize_scores(frame, name, [c for c in controls if c != name], _presorted=True)
         else:
-            scores = _factor_scores(frame, name)
+            scores = _factor_scores(frame, name, _presorted=True)
         fold_rows: list[dict[str, Any]] = []
         for year in range(s.year, e.year + 1):
             scoped = _scoped_universe(

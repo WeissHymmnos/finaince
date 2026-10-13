@@ -305,7 +305,7 @@ def run_sweep(
 
     def sort_key(r: dict[str, Any]) -> float:
         window = "OOS" if rank_by.startswith("oos_") else "IS"
-        metric_name = rank_by.split("_", 1)[1] if window == "OOS" else rank_by
+        metric_name = rank_by.split("_", 1)[1] if rank_by.startswith(("oos_", "is_")) else rank_by
         value = (r.get(window) or {}).get(metric_name)
         return value if isinstance(value, (int, float)) else float("-inf")
 
@@ -391,7 +391,7 @@ def top_specs_from_artifact(
         raise ValueError(f"sweep artifact has no ok rows: {artifact}")
 
     window = "OOS" if rank_by.startswith("oos_") else "IS"
-    metric_name = rank_by.split("_", 1)[1] if window == "OOS" else rank_by
+    metric_name = rank_by.split("_", 1)[1] if rank_by.startswith(("oos_", "is_")) else rank_by
 
     def sort_key(r: dict[str, Any]) -> float:
         value = (r.get(window) or {}).get(metric_name)

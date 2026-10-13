@@ -175,7 +175,12 @@ def test_reflect_sign_math() -> None:
     assert abs(mirror["sharpe"]) == pytest.approx(abs(metrics["sharpe"]))
     assert abs(mirror["ic_ir"]) == pytest.approx(abs(metrics["ic_ir"]))
     assert mirror["turnover"] == metrics["turnover"]
-    assert mirror["max_drawdown"] == metrics["max_drawdown"]
+    from finaince.domain.scoring import max_drawdown
+
+    # Negating the signal inverts the PnL path, so drawdown is recomputed, not copied.
+    expected_mdd = max_drawdown([-v for v in metrics["returns"].values()])
+    assert mirror["max_drawdown"] == pytest.approx(expected_mdd)
+    assert mirror["returns"]["2024-01-05"] == pytest.approx(-0.05)
     assert mirror["sign_reflected"] is True
     assert "[sign-mirrored]" in mirror["hypothesis"]
 

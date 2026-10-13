@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -333,6 +334,7 @@ def resolve_data_source() -> str:
 
 
 _PANEL_STATS_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+_PANEL_STATS_LOCK = threading.Lock()
 
 
 def panel_stats(path: Path | None = None) -> dict[str, Any]:
@@ -345,15 +347,16 @@ def panel_stats(path: Path | None = None) -> dict[str, Any]:
     try:
         st = parquet.stat()
         key = (str(parquet.resolve()), int(st.st_mtime_ns), int(st.st_size))
-        hit = _PANEL_STATS_CACHE.get(key)
-        if hit is not None:
-            return dict(hit)
+        with _PANEL_STATS_LOCK:
+            hit = _PANEL_STATS_CACHE.get(key)
+            if hit is not None:
+                return dict(hit)
         import polars as pl
 
         lf = pl.scan_parquet(parquet)
         names = lf.collect_schema().names()
         code_col = "ts_code" if "ts_code" in names else "instrument"
-        date_col = "trade_date" if "trade_date" in names else "datetime"
+        date_col = "trade_date" if "trade_date" in names else ("date" if "date" in names else "datetime")
         if code_col not in names or date_col not in names:
             stats = {"n_assets": 0, "n_days": 0, "thin": True, "start": None, "end": None}
         else:
@@ -385,9 +388,10 @@ def panel_stats(path: Path | None = None) -> dict[str, Any]:
                 "start": start_val.isoformat() if start_val else None,
                 "end": end_val.isoformat() if end_val else None,
             }
-        if len(_PANEL_STATS_CACHE) > 8:
-            _PANEL_STATS_CACHE.clear()
-        _PANEL_STATS_CACHE[key] = stats
+        with _PANEL_STATS_LOCK:
+            if len(_PANEL_STATS_CACHE) > 8:
+                _PANEL_STATS_CACHE.clear()
+            _PANEL_STATS_CACHE[key] = stats
         return dict(stats)
     except Exception:
         return {"n_assets": 0, "n_days": 0, "thin": True, "start": None, "end": None}
@@ -417,8 +421,13 @@ def detect_local_date_range(path: Path | None) -> tuple[date, date] | None:
     try:
         import polars as pl
 
-        df = pl.read_parquet(parquet, columns=["trade_date"])
-        lo, hi = df["trade_date"].min(), df["trade_date"].max()
+        lf = pl.scan_parquet(parquet)
+        names = lf.collect_schema().names()
+        date_col = next((c for c in ("trade_date", "date", "datetime") if c in names), None)
+        if date_col is None:
+            return None
+        bounds = lf.select([pl.col(date_col).min().alias("lo"), pl.col(date_col).max().alias("hi")]).collect()
+        lo, hi = bounds["lo"][0], bounds["hi"][0]
         if lo is None or hi is None:
             return None
         if hasattr(lo, "date"):

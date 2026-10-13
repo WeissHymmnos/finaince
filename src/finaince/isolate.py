@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -560,6 +561,7 @@ def run_isolated(
     name: str = "isolated",
     panel: dict[str, Any] | None = None,
     expression: str | None = None,
+    timeout: float = 20.0,
 ) -> dict[str, Any]:
     """Spawn a child that only runs ``child_isolate``. No pip in the child."""
     avail = isolator_available()
@@ -583,17 +585,24 @@ def run_isolated(
         attempts.append(("bwrap", _bwrap_command()))
     attempts.append(("frozen_builtin", _child_command()))
     last_error: str | None = None
+    deadline = time.monotonic() + max(0.1, float(timeout))
     for layer, argv in attempts:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {"ok": False, "skipped": True, "via": layer, "error": f"isolate_timeout: exceeded {timeout}s"}
         try:
             completed = subprocess.run(
                 argv,
                 input=payload,
                 capture_output=True,
                 text=True,
-                timeout=20,
+                timeout=max(0.1, remaining),
                 env=env,
                 check=False,
             )
+        except subprocess.TimeoutExpired as exc:
+            last_error = f"isolate_timeout: {exc}"
+            return {"ok": False, "skipped": True, "via": layer, "error": last_error}
         except Exception as exc:  # noqa: BLE001
             last_error = str(exc)
             if layer == "bwrap":

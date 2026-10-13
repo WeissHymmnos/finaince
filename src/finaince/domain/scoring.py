@@ -89,10 +89,12 @@ def library_grade(
     max_drawdown: float | None = None,
     dsr: float | None = None,
     pbo: float | None = None,
+    backtest_scorer: Any | None = None,
 ) -> dict[str, Any]:
     """0-100 + A/B/C/D. If expression is given, run the shipped FastMCP backtest path."""
     if expression:
-
+        if callable(backtest_scorer):
+            return backtest_scorer(expression, backtest_id=backtest_id)
         # Drive the real scoring via the same math as FastMCP without swapping semantics.
         from finaince.tools import run_library_grade_backtest
 

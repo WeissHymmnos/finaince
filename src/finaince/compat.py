@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,24 @@ def popen_detached(argv: list[str], **kwargs: Any) -> subprocess.Popen[Any]:
     return subprocess.Popen(argv, **kwargs)
 
 
+def reap_all_zombies() -> int:
+    """Reap any terminated child processes in non-blocking mode (WNOHANG)."""
+    waitpid = getattr(os, "waitpid", None)
+    wnohang = int(getattr(os, "WNOHANG", 0))
+    if waitpid is None or not wnohang:
+        return 0
+    reaped = 0
+    while True:
+        try:
+            waited, _status = waitpid(-1, wnohang)
+            if waited <= 0:
+                break
+            reaped += 1
+        except (ChildProcessError, ProcessLookupError, OSError):
+            break
+    return reaped
+
+
 def pid_alive(pid: int) -> bool:
     """True if ``pid`` is a live (non-zombie) process."""
     pid = int(pid)
@@ -68,8 +87,8 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def terminate_process_tree(pid: int, pgid: int | None = None) -> None:
-    """Best-effort kill of a job and its children (POSIX group or Windows tree)."""
+def terminate_process_tree(pid: int, pgid: int | None = None, *, timeout: float = 3.0) -> None:
+    """Best-effort kill of a job and its children (POSIX group or Windows tree) with SIGKILL escalation."""
     pid = int(pid)
     if is_windows():
         ctrl = getattr(signal, "CTRL_BREAK_EVENT", None)
@@ -87,16 +106,44 @@ def terminate_process_tree(pid: int, pgid: int | None = None) -> None:
         return
     target = int(pgid or pid)
     killpg = getattr(os, "killpg", None)
+    sent = False
     if killpg is not None:
         try:
             killpg(target, signal.SIGTERM)
-            return
+            sent = True
         except (ProcessLookupError, PermissionError, OSError):
             pass
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
+    if not sent:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            reap_all_zombies()
+            return
+        time.sleep(0.05)
+
+    if pid_alive(pid):
+        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+        if killpg is not None:
+            try:
+                killpg(target, sigkill)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        try:
+            os.kill(pid, sigkill)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        kill_deadline = time.monotonic() + 0.5
+        while time.monotonic() < kill_deadline:
+            reap_all_zombies()
+            if not pid_alive(pid):
+                break
+            time.sleep(0.02)
+        reap_all_zombies()
 
 
 def python_in_env(root: Path) -> Path | None:

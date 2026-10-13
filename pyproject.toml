@@ -60,6 +60,7 @@ packages = ["src/finaince"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/finaince/data/local_panel/prices.parquet" = "finaince/data/local_panel/prices.parquet"
+"src/finaince/data/alpha_seed_zoo.json" = "finaince/data/alpha_seed_zoo.json"
 "src/finaince/web/index.html" = "finaince/web/index.html"
 "NOTICE" = "finaince/NOTICE"
 
