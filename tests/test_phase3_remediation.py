@@ -534,3 +534,260 @@ def test_engine_ts_max_is_rolling_but_max_is_elementwise() -> None:
     )
     assert out["ts"].to_list()[2:] == [5.0, 5.0, 4.0]
     assert out["el"].to_list() == [3.0, 5.0, 3.0, 3.0, 4.0]
+
+
+# ---------------------------------------------------------------------------
+# TC-QUANT-02: Cross-year post-adjustment / adj_factor split continuity
+# ---------------------------------------------------------------------------
+
+
+def test_cross_year_adj_factor_split_continuity(isolated_home) -> None:
+    """TC-QUANT-02: A 2-for-1 split on 2024-01-02 (raw close 100 -> 50, adj_factor 1.0 -> 2.0)
+    must produce 0.0% cross-year forward return rather than an artificial -50% crash."""
+    from finaince.data_track import _forward_returns, read_years, write_year_frame
+
+    f2023 = pl.DataFrame(
+        {
+            "trade_date": [date(2023, 12, 28), date(2023, 12, 29)],
+            "ts_code": ["000001.XSHE", "000001.XSHE"],
+            "open": [100.0, 100.0],
+            "high": [101.0, 101.0],
+            "low": [99.0, 99.0],
+            "close": [100.0, 100.0],
+            "volume": [1000.0, 1000.0],
+            "amount": [100000.0, 100000.0],
+            "adj_factor": [1.0, 1.0],
+        }
+    )
+    f2024 = pl.DataFrame(
+        {
+            "trade_date": [date(2024, 1, 2), date(2024, 1, 3)],
+            "ts_code": ["000001.XSHE", "000001.XSHE"],
+            "open": [50.0, 51.0],
+            "high": [51.0, 52.0],
+            "low": [49.0, 50.0],
+            "close": [50.0, 51.0],
+            "volume": [2000.0, 2000.0],
+            "amount": [100000.0, 102000.0],
+            "adj_factor": [2.0, 2.0],
+        }
+    )
+    write_year_frame(2023, f2023)
+    write_year_frame(2024, f2024)
+
+    combined = read_years(date(2023, 1, 1), date(2024, 12, 31))
+    fwd = _forward_returns(combined).sort("trade_date")
+    by_day = dict(zip(fwd["trade_date"].to_list(), fwd["_fwd_ret"].to_list(), strict=True))
+    # Cross-year boundary 2023-12-29 -> 2024-01-02 has 0% true return (100*1.0 -> 50*2.0)
+    assert by_day[date(2023, 12, 29)] == pytest.approx(0.0, abs=1e-9)
+    assert by_day[date(2024, 1, 2)] == pytest.approx(0.02, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# [P2-22] / ISSUE-R4-04: DSR exception observability in review/gates.py
+# ---------------------------------------------------------------------------
+
+
+def test_deflated_sharpe_emits_error_event_on_bad_input(monkeypatch) -> None:
+    from finaince.review import gates
+
+    events: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "finaince.obs.emit",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    bad_returns = {f"2024-01-{i:02d}": "not-a-float" for i in range(1, 25)}
+    res = gates.deflated_sharpe(bad_returns, n_trials=5)  # type: ignore[arg-type]
+    assert res is None
+    assert any(ev == "gates_dsr_error" for ev, _ in events)
+
+
+# ---------------------------------------------------------------------------
+# [P1-11] / ISSUE-R3-07: run_research_desk inside an active asyncio event loop
+# ---------------------------------------------------------------------------
+
+
+def test_run_research_desk_safe_inside_running_event_loop(monkeypatch) -> None:
+    import asyncio
+    import sys
+    import types
+
+    from finaince import agent
+
+    class _DummyTextBlock:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _DummyResultMessage:
+        def __init__(self, result: str) -> None:
+            self.result = result
+            self.content = [_DummyTextBlock(result)]
+
+    async def _fake_query(*args, **kwargs):
+        yield _DummyResultMessage("safe-in-loop")
+
+    fake_sdk = types.ModuleType("claude_agent_sdk")
+    fake_sdk.TextBlock = _DummyTextBlock  # type: ignore[attr-defined]
+    fake_sdk.ResultMessage = _DummyResultMessage  # type: ignore[attr-defined]
+    fake_sdk.query = _fake_query  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
+    monkeypatch.setattr(agent, "build_claude_agent_options", lambda **kw: {})
+
+    async def _caller() -> dict[str, Any]:
+        return agent.run_research_desk("hello from running loop")
+
+    out = asyncio.run(_caller())
+    assert out["ok"] is True
+    assert "safe-in-loop" in out["text"]
+
+
+# ---------------------------------------------------------------------------
+# [P1-17] / ISSUE-R3-10: score_frame_window evaluates _factor_artifacts once
+# ---------------------------------------------------------------------------
+
+
+def test_score_frame_window_calls_factor_artifacts_once(monkeypatch) -> None:
+    import finaince.data_track as dt
+    from finaince.eval.pit_core import score_frame_window
+
+    calls = 0
+    orig = dt._factor_artifacts
+
+    def _wrapped(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(dt, "_factor_artifacts", _wrapped)
+    days = [date(2024, 1, 1) + timedelta(days=i) for i in range(25)]
+    codes = [f"{i:06d}.XSHE" for i in range(1, 25)]
+    rows = [
+        {
+            "trade_date": d,
+            "ts_code": c,
+            "open": 10.0 + idx * 0.1,
+            "high": 10.5 + idx * 0.1,
+            "low": 9.5 + idx * 0.1,
+            "close": 10.0 + idx * 0.1 + (i % 5) * 0.05,
+            "volume": 1000.0,
+            "amount": 10000.0,
+        }
+        for idx, d in enumerate(days)
+        for i, c in enumerate(codes)
+    ]
+    frame = pl.DataFrame(rows)
+    universe = {d: set(codes) for d in days}
+    score_frame_window(frame, "Rank(Delta(close, 5))", universe, days[0], days[-1], 5.0)
+    assert calls == 1
+
+
+# ---------------------------------------------------------------------------
+# [P1-19] / ISSUE-R1-05: sqlmodel declared in reproduction optional-dependencies
+# ---------------------------------------------------------------------------
+
+
+def test_pyproject_declares_sqlmodel_in_reproduction_extra() -> None:
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    repro_deps = data["project"]["optional-dependencies"]["reproduction"]
+    assert any(dep.startswith("sqlmodel") for dep in repro_deps)
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-R3-11 & ISSUE-R3-19: FactorCatalog lightweight init + SQLite WAL mode
+# ---------------------------------------------------------------------------
+
+
+def test_factor_catalog_instantiation_skips_redundant_ddl_and_uses_wal(
+    isolated_home, monkeypatch
+) -> None:
+    from finaince import db
+    from finaince.catalog.store import FactorCatalog
+
+    cat1 = FactorCatalog()
+    with db.managed_connection(cat1.db_path) as conn:
+        mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+    assert str(mode).lower() == "wal"
+
+    connect_calls = 0
+    orig_connect = db.sqlite3.connect
+
+    def _counting_connect(*args, **kwargs):
+        nonlocal connect_calls
+        connect_calls += 1
+        return orig_connect(*args, **kwargs)
+
+    monkeypatch.setattr(db.sqlite3, "connect", _counting_connect)
+    for _ in range(10):
+        FactorCatalog()
+    assert connect_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-R3-15 & ISSUE-R3-20 & ISSUE-R1-08: sweep public imports, presorted & vectorized combine
+# ---------------------------------------------------------------------------
+
+
+def test_sweep_public_aliases_and_presorted_score_candidate() -> None:
+    import finaince.data_track as dt
+    import finaince.sweep as sw
+
+    for pub_name in (
+        "year_dir",
+        "forward_returns",
+        "daily_ic",
+        "layered_long_short",
+        "scoped_universe",
+        "metrics_from_artifacts",
+    ):
+        assert hasattr(dt, pub_name)
+        assert getattr(sw, pub_name) is getattr(dt, pub_name)
+
+    frame = pl.DataFrame(
+        {
+            "trade_date": [date(2024, 1, 1 + d) for d in range(10) for _ in range(4)],
+            "ts_code": [f"00000{c}.XSHE" for _ in range(10) for c in range(1, 5)],
+            "close": [10.0 + d * 0.1 + c * 0.2 for d in range(10) for c in range(1, 5)],
+        }
+    )
+    panel = frame.sort(["ts_code", "trade_date"])
+    spec = sw.build_grid(fields=("close",), windows=(5,))[0]
+    s1 = sw.score_candidate(frame, spec)
+    s2 = sw.score_candidate(panel, spec, _presorted=True)
+    assert s1.equals(s2)
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-R3-16: _train_gbm_head periodic refit stride (retrain_every)
+# ---------------------------------------------------------------------------
+
+
+def test_train_gbm_head_retrain_every_stride() -> None:
+    from finaince.model_head import _train_gbm_head
+
+    returns = {
+        (date(2024, 1, 1) + timedelta(days=i)).isoformat(): 0.001 * ((i % 7) - 3)
+        for i in range(45)
+    }
+    res = _train_gbm_head(returns, min_train=10, cost_bps=5.0, retrain_every=5)
+    assert res["model_config"]["retrain_every"] == 5
+    if not res.get("skipped"):
+        assert res["model_config"]["n_obs"] == 45 - 5 - 10
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-R2-15: sharpe_ratio supports Bessel's correction (ddof=1)
+# ---------------------------------------------------------------------------
+
+
+def test_sharpe_ratio_supports_bessel_correction_ddof() -> None:
+    from finaince.domain.scoring import sharpe_ratio
+
+    vals = [((i % 7) - 3) / 500.0 for i in range(60)]
+    s_pop = sharpe_ratio(vals, ddof=0)
+    s_sample = sharpe_ratio(vals, ddof=1)
+    assert s_pop is not None and s_sample is not None
+    assert abs(s_sample) == pytest.approx(abs(s_pop) * math.sqrt(59.0 / 60.0))
+

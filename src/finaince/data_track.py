@@ -375,15 +375,20 @@ def _forward_returns(frame: Any, *, _presorted: bool = False) -> Any:
     import polars as pl
 
     panel = frame if _presorted else frame.sort(["ts_code", "trade_date"])
-    untradable = _untradable_next_day_expr(list(panel.columns))
-    valid = pl.col("close") > 1e-6
+    cols = list(panel.columns)
+    untradable = _untradable_next_day_expr(cols)
+    if "adj_factor" in cols:
+        adj_close = pl.col("close") * pl.col("adj_factor")
+    else:
+        adj_close = pl.col("close")
+    next_adj_close = adj_close.shift(-1).over("ts_code")
+    valid = (adj_close > 1e-6) & (next_adj_close > 1e-6)
     if untradable is not None:
         valid = valid & ~untradable
     return panel.with_columns(
         pl.when(valid)
-        .then(pl.col("close").shift(-1) / pl.col("close") - 1.0)
+        .then(next_adj_close / adj_close - 1.0)
         .otherwise(None)
-        .over("ts_code")
         .fill_nan(None)
         .alias("_fwd_ret")
     ).select(["trade_date", "ts_code", "_fwd_ret"])
@@ -1104,3 +1109,13 @@ def doctor_section() -> dict[str, Any]:
         "first_component_date": min(comp).isoformat() if comp else None,
         "rq_creds": has_rq_credentials(),
     }
+
+
+year_dir = _year_dir
+forward_returns = _forward_returns
+daily_ic = _daily_ic
+layered_long_short = _layered_long_short
+scoped_universe = _scoped_universe
+factor_artifacts = _factor_artifacts
+metrics_from_artifacts = _metrics_from_artifacts
+

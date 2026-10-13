@@ -32,6 +32,7 @@ dev = [
     "ruff>=0.6",
 ]
 reproduction = [
+    "sqlmodel>=0.0.14",
     "reproagent @ git+https://github.com/WeissHymmnos/ReproAgent.git@18702585ed19f50c85c9dd9b023ebff2a09a56f7",
     "aiminer @ git+https://github.com/WeissHymmnos/aiminer.git@99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa",
     "finreportparser @ git+https://github.com/WeissHymmnos/finpdfpro.git@fb5314833a816d40201fb1173a6afe6788dfba2c",

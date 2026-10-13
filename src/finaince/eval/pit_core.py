@@ -26,14 +26,14 @@ def parse_rank_delta(expression: str) -> tuple[str, int, bool]:
     return match.group("field"), int(match.group("n")), bool(match.group("neg"))
 
 
-def score_expression(frame: Any, expression: str) -> Any:
+def score_expression(frame: Any, expression: str, *, _presorted: bool = False) -> Any:
     """Cross-sectional ordinal rank of Delta(field, n). Negation ranks the negated delta."""
     import polars as pl
 
     field, window, negate = parse_rank_delta(expression)
     if field not in frame.columns:
         raise ValueError(f"missing_field:{field}")
-    panel = frame.sort(["ts_code", "trade_date"])
+    panel = frame if _presorted else frame.sort(["ts_code", "trade_date"])
     raw = pl.col(field) - pl.col(field).shift(window).over("ts_code")
     if negate:
         raw = -raw
@@ -96,8 +96,9 @@ def score_frame_window(
     )
     from finaince.domain.costs import ls_trading_cost
 
-    scores = score_expression(frame, expression)
-    forwards = _forward_returns(frame)
+    panel = frame.sort(["ts_code", "trade_date"])
+    scores = score_expression(panel, expression, _presorted=True)
+    forwards = _forward_returns(panel, _presorted=True)
     scoped = _scoped_universe(universe_by_day, start, end, embargo=embargo)
     artifacts = _factor_artifacts(scores, forwards, scoped)
     metrics = _metrics_from_artifacts(artifacts, cost_bps)

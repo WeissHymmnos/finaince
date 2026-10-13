@@ -14,12 +14,14 @@ from typing import Any
 TRADING_DAYS = 252.0
 
 
-def sharpe_ratio(values: list[float] | tuple[float, ...]) -> float | None:
+def sharpe_ratio(values: list[float] | tuple[float, ...], *, ddof: int = 0) -> float | None:
     """Annualized Sharpe of a daily return series; None when undefined (<20 obs or zero variance)."""
-    if len(values) < 20:
+    n = len(values)
+    denom = n - int(ddof)
+    if n < 20 or denom <= 0:
         return None
-    mean = sum(values) / len(values)
-    var = sum((x - mean) ** 2 for x in values) / len(values)
+    mean = sum(values) / n
+    var = sum((x - mean) ** 2 for x in values) / denom
     std = math.sqrt(var) if var > 0 else None
     if std is None:
         return None

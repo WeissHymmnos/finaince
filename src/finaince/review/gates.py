@@ -54,46 +54,58 @@ def deflated_sharpe(daily_returns: dict[str, float], n_trials: int) -> float | N
     """
     Deflated Sharpe Ratio per Bailey & López de Prado (2014).
     """
-    if not daily_returns or len(daily_returns) < 20:
+    try:
+        if not daily_returns or len(daily_returns) < 20:
+            return None
+        import math
+        import statistics
+
+        returns = [float(v) for v in daily_returns.values()]
+        T = len(returns)
+        if T < 20:
+            return None
+        mean = sum(returns) / T
+        var = sum((x - mean) ** 2 for x in returns) / (T - 1)
+        if not math.isfinite(var) or var <= 1e-12:
+            return None
+
+        std = math.sqrt(var)
+        sr_hat = mean / std
+
+        m3 = sum((x - mean) ** 3 for x in returns) / T
+        m4 = sum((x - mean) ** 4 for x in returns) / T
+        skew = m3 / (std ** 3)
+        kurt = m4 / (std ** 4)
+
+        gamma = 0.5772156649015329
+        e = math.e
+        N = max(1, int(n_trials))
+
+        v_sr_unscaled = 1 - skew * sr_hat + ((kurt - 1) / 4.0) * (sr_hat ** 2)
+        if not math.isfinite(v_sr_unscaled) or v_sr_unscaled <= 0:
+            return None
+        v_sr = v_sr_unscaled / (T - 1)
+
+        inv_cdf = statistics.NormalDist().inv_cdf
+
+        if N == 1:
+            sr0 = 0.0
+        else:
+            sr0 = math.sqrt(v_sr) * ((1 - gamma) * inv_cdf(1 - 1 / N) + gamma * inv_cdf(1 - 1 / (N * e)))
+
+        num = (sr_hat - sr0) * math.sqrt(T - 1)
+        den = math.sqrt(v_sr_unscaled)
+
+        return statistics.NormalDist().cdf(num / den)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed("finaince.review.gates:deflated_sharpe", exc)
+        try:
+            from finaince.obs import emit
+
+            emit("gates_dsr_error", error=str(exc)[:200])
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.review.gates:deflated_sharpe_emit", _exc)
         return None
-    import math
-    import statistics
-
-    returns = list(daily_returns.values())
-    T = len(returns)
-    mean = sum(returns) / T
-    var = sum((x - mean) ** 2 for x in returns) / T
-    if var <= 1e-12:
-        return None
-
-    std = math.sqrt(var)
-    sr_hat = mean / std
-
-    m3 = sum((x - mean) ** 3 for x in returns) / T
-    m4 = sum((x - mean) ** 4 for x in returns) / T
-    skew = m3 / (std ** 3)
-    kurt = m4 / (std ** 4)
-
-    gamma = 0.5772156649015329
-    e = math.e
-    N = max(1, n_trials)
-
-    v_sr_unscaled = 1 - skew * sr_hat + ((kurt - 1) / 4.0) * (sr_hat ** 2)
-    if v_sr_unscaled <= 0:
-        return None
-    v_sr = v_sr_unscaled / (T - 1)
-
-    inv_cdf = statistics.NormalDist().inv_cdf
-
-    if N == 1:
-        sr0 = 0.0
-    else:
-        sr0 = math.sqrt(v_sr) * ((1 - gamma) * inv_cdf(1 - 1 / N) + gamma * inv_cdf(1 - 1 / (N * e)))
-
-    num = (sr_hat - sr0) * math.sqrt(T - 1)
-    den = math.sqrt(v_sr_unscaled)
-
-    return statistics.NormalDist().cdf(num / den)
 
 
 def _originality_corpus(exclude_id: str | None = None) -> list[tuple[str, str]]:

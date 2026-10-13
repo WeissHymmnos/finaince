@@ -56,9 +56,17 @@ def _train_gbm_head(
     returns: dict[str, float],
     min_train: int = 10,
     cost_bps: float = 5.0,
+    retrain_every: int = 5,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    config: dict[str, Any] = {"kind": "gbm", "lags": 5, "min_train": min_train, "cost_bps": cost_bps}
+    stride = max(1, int(retrain_every))
+    config: dict[str, Any] = {
+        "kind": "gbm",
+        "lags": 5,
+        "min_train": min_train,
+        "cost_bps": cost_bps,
+        "retrain_every": stride,
+    }
     
     backend = None
     ModelClass = None
@@ -104,39 +112,41 @@ def _train_gbm_head(
     preds = []
     realized = []
     pred_keys = []
+    active_predictor = None
     
     try:
-        for t in range(min_train, len(y)):
+        for step_idx, t in enumerate(range(min_train, len(y))):
             X_train = X[:t]
             y_train = y[:t]
             X_test = X[t:t+1]
             y_test = y[t]
 
-            try:
-                model = ModelClass(**model_kwargs)
-                model.fit(X_train, y_train)
-                pred = float(model.predict(X_test)[0])
-            except Exception as inner_exc:
-                if (
-                    backend == "lightgbm"
-                    and "scikit-learn" in str(inner_exc)
-                    and hasattr(lightgbm, "train")
-                ):
-                    ds = lightgbm.Dataset(X_train, label=y_train, free_raw_data=False)
-                    bst = lightgbm.train(
-                        {
-                            "objective": "regression",
-                            "max_depth": 3,
-                            "learning_rate": 0.05,
-                            "min_data_in_leaf": max(1, min(5, len(X_train) // 3)),
-                            "verbose": -1,
-                        },
-                        ds,
-                        num_boost_round=20,
-                    )
-                    pred = float(bst.predict(X_test)[0])
-                else:
-                    raise
+            if active_predictor is None or step_idx % stride == 0:
+                try:
+                    model = ModelClass(**model_kwargs)
+                    model.fit(X_train, y_train)
+                    active_predictor = model
+                except Exception as inner_exc:
+                    if (
+                        backend == "lightgbm"
+                        and "scikit-learn" in str(inner_exc)
+                        and hasattr(lightgbm, "train")
+                    ):
+                        ds = lightgbm.Dataset(X_train, label=y_train, free_raw_data=False)
+                        active_predictor = lightgbm.train(
+                            {
+                                "objective": "regression",
+                                "max_depth": 3,
+                                "learning_rate": 0.05,
+                                "min_data_in_leaf": max(1, min(5, len(X_train) // 3)),
+                                "verbose": -1,
+                            },
+                            ds,
+                            num_boost_round=20,
+                        )
+                    else:
+                        raise
+            pred = float(active_predictor.predict(X_test)[0])
 
             preds.append(pred)
             realized.append(y_test)

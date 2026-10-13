@@ -19,17 +19,24 @@ from typing import Any, Callable
 from finaince.data_track import (
     CACHE_VERSION,
     INDEX_CODE,
-    _daily_ic,
-    _forward_returns,
-    _layered_long_short,
-    _metrics_from_artifacts,
-    _scoped_universe,
-    _year_dir,
     components_map,
+    daily_ic,
+    forward_returns,
+    layered_long_short,
+    metrics_from_artifacts,
     read_years,
+    scoped_universe,
     suspensions_map,
     tradable_members,
+    year_dir,
 )
+
+_daily_ic = daily_ic
+_forward_returns = forward_returns
+_layered_long_short = layered_long_short
+_metrics_from_artifacts = metrics_from_artifacts
+_scoped_universe = scoped_universe
+_year_dir = year_dir
 
 FIELDS = ("close", "high", "low", "volume", "amount")
 WINDOWS = (5, 10, 20, 40, 60)
@@ -152,12 +159,12 @@ def build_grid(
     return grid
 
 
-def score_candidate(frame: Any, spec: dict[str, Any]) -> Any:
+def score_candidate(frame: Any, spec: dict[str, Any], *, _presorted: bool = False) -> Any:
     import polars as pl
 
     builder = TEMPLATES[spec["template"]][0]
     raw_expr = builder(spec["field"], int(spec["window"]))
-    panel = frame.sort(["ts_code", "trade_date"])
+    panel = frame if _presorted else frame.sort(["ts_code", "trade_date"])
     ranked = panel.with_columns(raw_expr.alias("_raw")).with_columns(
         pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
     )
@@ -166,19 +173,7 @@ def score_candidate(frame: Any, spec: dict[str, Any]) -> Any:
 
 def _eval_chunk(payload: tuple[list[dict[str, Any]], dict[str, Any]]) -> list[dict[str, Any]]:
     specs, cfg = payload
-    frame = read_years(
-        date(int(cfg["first_year"]), 1, 1),
-        date(int(cfg["last_year"]), 12, 31),
-        verify_hash=False,
-    )
-    comp = components_map()
-    suspended = suspensions_map()
-    universe_by_day_all: dict[Any, set[str]] = {}
-    for day in set(frame["trade_date"].to_list()):
-        members = tradable_members(day, comp, suspended)
-        if members:
-            universe_by_day_all[day] = set(members)
-    forwards = _forward_returns(frame)
+    panel, universe_by_day_all, forwards = _load_eval_context(cfg)
     windows = {
         "IS": (date.fromisoformat(cfg["is_start"]), date.fromisoformat(cfg["is_end"])),
         "OOS": (date.fromisoformat(cfg["oos_start"]), date.fromisoformat(cfg["oos_end"])),
@@ -193,7 +188,7 @@ def _eval_chunk(payload: tuple[list[dict[str, Any]], dict[str, Any]]) -> list[di
             "window": spec["window"],
         }
         try:
-            scores = score_candidate(frame, spec)
+            scores = score_candidate(panel, spec, _presorted=True)
             from finaince.eval.pit_core import metrics_for_window
 
             for label, (w_start, w_end) in windows.items():
@@ -542,8 +537,8 @@ def _load_eval_context(cfg: dict[str, Any]) -> tuple[Any, dict[Any, set[str]], A
         members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
-    forwards = _forward_returns(frame)
     panel = frame.sort(["ts_code", "trade_date"])
+    forwards = _forward_returns(panel, _presorted=True)
     return panel, universe_by_day_all, forwards
 
 
@@ -673,17 +668,23 @@ def _combined_fold_row(
     }
     try:
         panel, universe_by_day_all, forwards = _load_eval_context(cfg)
-        acc = None
         col_of: dict[str, str] = {}
+        raw_exprs = []
+        rank_exprs = []
         for i, spec in enumerate(picked_specs):
             col = f"_m{i}"
+            raw_col = f"_raw_{i}"
             col_of[spec["name"]] = col
-            sf = _score_spec(panel, spec).rename({"_score": col})
-            acc = (
-                sf.select(["trade_date", "ts_code", col])
-                if acc is None
-                else acc.join(sf, on=["trade_date", "ts_code"], how="inner")
+            builder = TEMPLATES[spec["template"]][0]
+            raw_exprs.append(builder(spec["field"], int(spec["window"])).alias(raw_col))
+            rank_exprs.append(
+                pl.col(raw_col).rank(method="ordinal").over("trade_date").alias(col)
             )
+        acc = (
+            panel.with_columns(raw_exprs)
+            .with_columns(rank_exprs)
+            .select(["trade_date", "ts_code", *col_of.values()])
+        )
         years = range(int(cfg["start_year"]), int(cfg["end_year"]) + 1)
         cadence = max(1, int(cfg.get("rebalance_every", 1)))
         k = len(picked_specs)
