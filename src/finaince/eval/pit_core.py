@@ -88,14 +88,34 @@ def score_frame_window(
     *,
     embargo: bool = True,
 ) -> dict[str, Any]:
-    from finaince.data_track import _forward_returns
+    from finaince.data_track import (
+        _factor_artifacts,
+        _forward_returns,
+        _metrics_from_artifacts,
+        _scoped_universe,
+    )
 
     scores = score_expression(frame, expression)
     forwards = _forward_returns(frame)
-    metrics = metrics_for_window(
-        scores, forwards, universe_by_day, start, end, cost_bps, embargo=embargo
-    )
-    ls, turnover = _long_short(scores, forwards, universe_by_day, start, end, embargo=embargo)
+    scoped = _scoped_universe(universe_by_day, start, end, embargo=embargo)
+    artifacts = _factor_artifacts(scores, forwards, scoped)
+    metrics = _metrics_from_artifacts(artifacts, cost_bps)
+
+    names: set[str] = set()
+    for members in scoped.values():
+        names.update(members)
+    metrics["n_names"] = len(names)
+    metrics["n_days"] = metrics.get("days")
+    metrics["cost_bps"] = cost_bps
+    metrics["turnover_model"] = TURNOVER_MODEL
+    metrics["engine"] = "pit_core"
+    metrics["window_start"] = start.isoformat()
+    metrics["window_end"] = end.isoformat()
+    metrics["embargo_last_day"] = embargo
+    if "icir" not in metrics and "ic_ir" in metrics:
+        metrics["icir"] = metrics["ic_ir"]
+
+    ls, turnover = artifacts["ls"]
     daily: dict[str, float] = {}
     for day, raw in ls:
         churn = turnover.get(day, 0.0)

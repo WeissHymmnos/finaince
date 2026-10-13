@@ -5,6 +5,7 @@ No pip, no network, no subprocess from inside the child.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -21,7 +22,6 @@ FROZEN_MODULES = frozenset(
         "collections",
         "itertools",
         "functools",
-        "operator",
         "decimal",
         "typing",
         "numpy",
@@ -113,7 +113,259 @@ def _bwrap_command() -> list[str]:
     return argv
 
 
-_FORBIDDEN_SOURCE = ("open(", "eval(", "exec(", "compile(", "__import__(")
+class ASTSecurityError(PermissionError):
+    """Raised when source code violates sandboxed AST whitelist constraints."""
+
+
+ALLOWED_NODE_TYPES = frozenset(
+    {
+        ast.Module,
+        ast.FunctionDef,
+        ast.arguments,
+        ast.arg,
+        ast.Return,
+        ast.Pass,
+        ast.Expr,
+        ast.Assign,
+        ast.AnnAssign,
+        ast.AugAssign,
+        ast.If,
+        ast.IfExp,
+        ast.For,
+        ast.While,
+        ast.Break,
+        ast.Continue,
+        ast.ListComp,
+        ast.DictComp,
+        ast.SetComp,
+        ast.GeneratorExp,
+        ast.comprehension,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.BoolOp,
+        ast.Compare,
+        ast.Call,
+        ast.keyword,
+        ast.Attribute,
+        ast.Subscript,
+        ast.Slice,
+        ast.Name,
+        ast.Constant,
+        ast.FormattedValue,
+        ast.JoinedStr,
+        ast.Lambda,
+        ast.NamedExpr,
+        ast.List,
+        ast.Tuple,
+        ast.Dict,
+        ast.Set,
+        ast.Starred,
+        ast.Load,
+        ast.Store,
+        ast.Del,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
+        ast.Pow,
+        ast.MatMult,
+        ast.LShift,
+        ast.RShift,
+        ast.BitOr,
+        ast.BitXor,
+        ast.BitAnd,
+        ast.Invert,
+        ast.Not,
+        ast.UAdd,
+        ast.USub,
+        ast.And,
+        ast.Or,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+    }
+)
+
+FORBIDDEN_NAMES = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "open",
+        "input",
+        "breakpoint",
+        "getattr",
+        "setattr",
+        "delattr",
+        "hasattr",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "__builtins__",
+        "help",
+        "exit",
+        "quit",
+        "memoryview",
+        "sys",
+        "os",
+        "subprocess",
+        "socket",
+        "ctypes",
+        "shutil",
+        "importlib",
+        "operator",
+        "attrgetter",
+        "methodcaller",
+        "itemgetter",
+    }
+)
+
+FORBIDDEN_ATTRS = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "open",
+        "getattr",
+        "setattr",
+        "delattr",
+        "system",
+        "popen",
+        "spawn",
+        "kill",
+        "remove",
+        "unlink",
+        "sys",
+        "os",
+        "subprocess",
+        "modules",
+        "ctypes",
+        "ctypeslib",
+        "f2py",
+        "environ",
+        "socket",
+        "shutil",
+        "run",
+        "call",
+        "check_output",
+        "check_call",
+        "load_library",
+        "CDLL",
+        "cdll",
+        "listdir",
+        "fork",
+        "execl",
+        "execv",
+        "attrgetter",
+        "methodcaller",
+        "itemgetter",
+        "read_csv",
+        "read_parquet",
+        "read_json",
+        "read_table",
+        "read_excel",
+        "to_csv",
+        "to_parquet",
+        "to_json",
+        "load",
+        "save",
+        "fromfile",
+    }
+)
+
+
+class QuantASTValidator(ast.NodeVisitor):
+    """Enforce strict whitelist syntax checks against factor computation AST."""
+
+    def generic_visit(self, node: ast.AST) -> None:
+        if type(node) not in ALLOWED_NODE_TYPES:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                mod = getattr(node, "module", "") or (node.names[0].name if node.names else "")
+                raise ImportError(f"module import is forbidden in sandboxed factor environment: {mod}")
+            lineno = getattr(node, "lineno", "?")
+            raise ASTSecurityError(
+                f"Forbidden AST node type: {type(node).__name__} at line {lineno}"
+            )
+        super().generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        mod = node.names[0].name if node.names else ""
+        raise ImportError(f"module import is forbidden in sandboxed factor environment: {mod}")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        mod = node.module or (node.names[0].name if node.names else "")
+        raise ImportError(f"module import is forbidden in sandboxed factor environment: {mod}")
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id.startswith("__"):
+            raise ASTSecurityError(f"Access to dunder identifier '{node.id}' is forbidden")
+        if node.id in FORBIDDEN_NAMES:
+            raise ASTSecurityError(f"Access to dangerous identifier '{node.id}' is forbidden")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr.startswith("_"):
+            raise ASTSecurityError(f"Access to private/dunder attribute '{node.attr}' is forbidden")
+        if node.attr in FORBIDDEN_ATTRS or node.attr in FORBIDDEN_NAMES:
+            raise ASTSecurityError(f"Access to dangerous attribute '{node.attr}' is forbidden")
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+            if node.slice.value.startswith("__"):
+                raise ASTSecurityError(f"Access to dunder key '{node.slice.value}' is forbidden")
+        elif isinstance(node.slice, ast.Tuple):
+            for elt in node.slice.elts:
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.startswith("__"):
+                    raise ASTSecurityError(f"Access to dunder key '{elt.value}' is forbidden")
+        self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, str):
+            if node.value.startswith("__"):
+                raise ASTSecurityError(f"Dunder string constant '{node.value}' is forbidden in sandbox")
+            lowered = node.value.lower()
+            if "pip install" in lowered or "pip.main" in lowered:
+                raise ASTSecurityError("pip install is forbidden in sandbox")
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if node.name.startswith("__"):
+            raise ASTSecurityError(f"Dunder function name '{node.name}' is forbidden")
+        if node.decorator_list:
+            raise ASTSecurityError("Decorators are forbidden in sandboxed factor environment")
+        for arg in node.args.args + node.args.kwonlyargs:
+            if arg.arg.startswith("__"):
+                raise ASTSecurityError(f"Dunder argument name '{arg.arg}' is forbidden")
+        self.generic_visit(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for arg in node.args.args + node.args.kwonlyargs:
+            if arg.arg.startswith("__"):
+                raise ASTSecurityError(f"Dunder argument name '{arg.arg}' is forbidden")
+        self.generic_visit(node)
+
+    def validate(self, tree: ast.AST) -> None:
+        """Validate an AST against the whitelist policy, raising on violations."""
+        self.visit(tree)
+
+
+def validate_factor_ast(source: str) -> ast.AST:
+    """Parse and validate factor source code via AST visitor before compilation."""
+    tree = ast.parse(source, filename="<isolated>")
+    QuantASTValidator().validate(tree)
+    return tree
 
 
 def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
@@ -124,12 +376,16 @@ def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
     lowered = source.lower()
     if "pip install" in lowered or "pip.main" in lowered:
         return {"ok": False, "error": "pip_forbidden"}
-    if any(token in source for token in _FORBIDDEN_SOURCE):
-        return {"ok": False, "error": "forbidden_builtin"}
-    panel = req.get("panel") or default_panel()
-    ns: dict[str, Any] = {"__name__": "isolated_factor", "panel": panel, "__builtins__": _frozen_builtins()}
     try:
-        compiled = compile(source, "<isolated>", "exec")
+        tree = validate_factor_ast(source)
+    except (ImportError, ASTSecurityError, SyntaxError) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    panel = req.get("panel") or default_panel()
+    ns = _safe_namespace(panel)
+    try:
+        compiled = compile(tree, "<isolated>", "exec")
         exec(compiled, ns, ns)  # noqa: S102 — intentional, frozen child
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -175,9 +431,11 @@ _SAFE_BUILTIN_NAMES = (
     "max",
     "min",
     "next",
+    "pow",
     "range",
     "reversed",
     "round",
+    "set",
     "sorted",
     "str",
     "sum",
@@ -206,7 +464,22 @@ def _frozen_builtins() -> dict[str, Any]:
     safe["__import__"] = _frozen_import
     safe["__build_class__"] = root["__build_class__"]
     safe["__name__"] = "isolated_factor"
-    for banned in ("open", "eval", "exec", "compile", "input", "breakpoint"):
+    for banned in (
+        "open",
+        "eval",
+        "exec",
+        "compile",
+        "input",
+        "breakpoint",
+        "getattr",
+        "setattr",
+        "delattr",
+        "hasattr",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+    ):
         safe[banned] = _deny_builtin(banned)
     return safe
 
@@ -214,6 +487,71 @@ def _frozen_builtins() -> dict[str, Any]:
 def default_panel() -> dict[str, list[float]]:
     close = [100.0 + i * 0.4 + ((-1) ** i) * 0.2 for i in range(12)]
     return {"close": close, "open": [c - 0.1 for c in close]}
+
+
+def _safe_namespace(panel: dict[str, Any] | None = None) -> dict[str, Any]:
+    import types
+
+    panel_data = default_panel() if panel is None else panel
+    ns: dict[str, Any] = {
+        "__name__": "isolated_factor",
+        "panel": panel_data,
+        "__builtins__": _frozen_builtins(),
+    }
+    for mod_name in (
+        "math",
+        "json",
+        "datetime",
+        "collections",
+        "itertools",
+        "functools",
+        "decimal",
+    ):
+        try:
+            ns[mod_name] = __import__(mod_name)
+        except ImportError:
+            pass
+
+    try:
+        import statistics as _stat
+
+        ns["statistics"] = types.SimpleNamespace(
+            mean=_stat.mean,
+            median=_stat.median,
+            median_grouped=_stat.median_grouped,
+            median_high=_stat.median_high,
+            median_low=_stat.median_low,
+            mode=_stat.mode,
+            multimode=_stat.multimode,
+            stdev=_stat.stdev,
+            variance=_stat.variance,
+            pstdev=_stat.pstdev,
+            pvariance=_stat.pvariance,
+            quantiles=_stat.quantiles,
+            geometric_mean=_stat.geometric_mean,
+            harmonic_mean=_stat.harmonic_mean,
+            correlation=_stat.correlation,
+            covariance=_stat.covariance,
+            linear_regression=_stat.linear_regression,
+            fmean=_stat.fmean,
+            NormalDist=_stat.NormalDist,
+        )
+    except ImportError:
+        pass
+
+    for mod_name, aliases in (
+        ("numpy", ("np", "numpy")),
+        ("pandas", ("pd", "pandas")),
+        ("polars", ("pl", "polars")),
+    ):
+        try:
+            mod = __import__(mod_name)
+            for alias in aliases:
+                ns[alias] = mod
+        except ImportError:
+            pass
+
+    return ns
 
 
 def run_isolated(

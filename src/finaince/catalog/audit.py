@@ -6,9 +6,22 @@ import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 _REDACT = {"api_key", "password", "token", "authorization", "secret", "llm_api_key"}
+
+_AUDIT_DDL = """
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT,
+    action TEXT,
+    detail TEXT,
+    actor TEXT,
+    prev_hash TEXT,
+    hash TEXT
+);
+"""
 
 
 def _redact(detail: Any) -> Any:
@@ -25,12 +38,9 @@ def _redact(detail: Any) -> Any:
     return detail
 
 
-def _connect():
-    from finaince.catalog.store import FactorCatalog
+def _migrate_audit(conn: sqlite3.Connection) -> None:
     from finaince.db import ensure_columns
 
-    cat = FactorCatalog()
-    conn = sqlite3.connect(cat.db_path)
     ensure_columns(
         conn,
         "audit_log",
@@ -40,7 +50,22 @@ def _connect():
             ("hash", "TEXT"),
         ],
     )
-    return conn
+
+
+def _audit_db_path() -> Path:
+    from finaince.settings import get_settings
+
+    path = Path(get_settings().platform_db)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _connect(db_path: Path | str | None = None):
+    from finaince.db import ensure_database_initialized, managed_connection
+
+    path = _audit_db_path() if db_path is None else Path(db_path)
+    ensure_database_initialized(path, _AUDIT_DDL, migrations=_migrate_audit)
+    return managed_connection(path)
 
 
 def append(action: str, detail: dict[str, Any] | None = None, actor: str = "cli") -> str:

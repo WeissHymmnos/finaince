@@ -350,28 +350,116 @@ def _forward_returns(frame: Any) -> Any:
     ).select(["trade_date", "ts_code", "_fwd_ret"])
 
 
-def _daily_ic(scores: Any, forwards: Any, universe_by_day: dict[Any, set[str]], *, spearman: bool) -> list[float]:
-    joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
-    ics: list[float] = []
-    for day, group in joined.group_by("trade_date"):
-        members = universe_by_day.get(day[0])
-        if members is None:
-            continue
-        group = group.filter(group["ts_code"].is_in(sorted(members)))
-        if group.height < 10:
-            continue
-        x = group["_score"]
-        y = group["_fwd_ret"]
-        if spearman:
-            x = x.rank(method="average")
-            y = y.rank(method="average")
-        sx = x.std()
-        sy = y.std()
-        if sx == 0 or sy == 0 or sx is None or sy is None:
-            continue
-        covariance = ((x - x.mean()) * (y - y.mean())).mean()
-        ics.append(float(covariance / (sx * sy)))
-    return ics
+def _align_date_col(col_name: str, src_dt: Any, target_dt: Any) -> Any:
+    import polars as pl
+
+    col = pl.col(col_name)
+    if src_dt == target_dt:
+        return col
+    if target_dt == pl.Date:
+        if src_dt in (pl.String, pl.Utf8):
+            return col.str.to_date()
+        return col.cast(pl.Date)
+    elif target_dt in (pl.String, pl.Utf8):
+        return col.cast(pl.String)
+    elif target_dt == pl.Datetime or (hasattr(pl, "Datetime") and isinstance(target_dt, pl.Datetime)):
+        if src_dt in (pl.String, pl.Utf8):
+            return col.str.to_datetime()
+        return col.cast(pl.Datetime)
+    return col.cast(target_dt)
+
+
+def _make_universe_frame(joined: Any, universe_by_day: dict[Any, set[str]]) -> Any:
+    import polars as pl
+
+    target_dt = joined["trade_date"].dtype
+    u_days: list[Any] = []
+    u_codes: list[str] = []
+    for d, members in universe_by_day.items():
+        if members:
+            u_days.extend([d] * len(members))
+            u_codes.extend(members)
+    if not u_days:
+        return pl.DataFrame(
+            {"trade_date": pl.Series([], dtype=target_dt), "ts_code": pl.Series([], dtype=pl.String)}
+        )
+    u_df = pl.DataFrame({"trade_date": u_days, "ts_code": u_codes})
+    src_dt = u_df["trade_date"].dtype
+    if src_dt != target_dt:
+        u_df = u_df.with_columns(_align_date_col("trade_date", src_dt, target_dt))
+    return u_df
+
+
+def _universe_days_aligned(joined: Any, universe_by_day: dict[Any, set[str]]) -> set[Any]:
+    import polars as pl
+
+    if not universe_by_day:
+        return set()
+    target_dt = joined["trade_date"].dtype
+    sample_key = next(iter(universe_by_day))
+    if (target_dt == pl.Date and isinstance(sample_key, date)) or (
+        target_dt in (pl.String, pl.Utf8) and isinstance(sample_key, str)
+    ):
+        return set(universe_by_day.keys())
+    k_df = pl.DataFrame({"trade_date": list(universe_by_day.keys())})
+    src_dt = k_df["trade_date"].dtype
+    if src_dt != target_dt:
+        k_df = k_df.with_columns(_align_date_col("trade_date", src_dt, target_dt))
+    return set(k_df["trade_date"].to_list())
+
+
+def _daily_ic(
+    scores: Any,
+    forwards: Any,
+    universe_by_day: dict[Any, set[str]],
+    *,
+    spearman: bool,
+    _prejoined: Any = None,
+) -> list[float]:
+    import polars as pl
+
+    if _prejoined is not None:
+        filtered = _prejoined
+    else:
+        joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+        if joined.is_empty():
+            return []
+        u_df = _make_universe_frame(joined, universe_by_day)
+        filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
+
+    if filtered.is_empty():
+        return []
+
+    if spearman:
+        panel = filtered.with_columns(
+            pl.col("_score").rank(method="average").over("trade_date").alias("x"),
+            pl.col("_fwd_ret").rank(method="average").over("trade_date").alias("y"),
+        )
+    else:
+        panel = filtered.with_columns(
+            pl.col("_score").alias("x"),
+            pl.col("_fwd_ret").alias("y"),
+        )
+
+    agg = (
+        panel.group_by("trade_date")
+        .agg(
+            pl.len().alias("n"),
+            pl.col("x").std().alias("sx"),
+            pl.col("y").std().alias("sy"),
+            ((pl.col("x") - pl.col("x").mean()) * (pl.col("y") - pl.col("y").mean())).mean().alias("cov"),
+        )
+        .filter(
+            (pl.col("n") >= 10)
+            & pl.col("sx").is_not_null()
+            & pl.col("sy").is_not_null()
+            & (pl.col("sx") > 0)
+            & (pl.col("sy") > 0)
+        )
+        .sort("trade_date")
+        .select((pl.col("cov") / (pl.col("sx") * pl.col("sy"))).alias("ic"))
+    )
+    return agg["ic"].to_list()
 
 
 def _layered_long_short(
@@ -380,42 +468,87 @@ def _layered_long_short(
     universe_by_day: dict[Any, set[str]],
     *,
     n_groups: int = 5,
+    _prejoined: Any = None,
+    _all_days: list[Any] | None = None,
 ) -> tuple[list[tuple[Any, float]], dict[Any, float]]:
     """Quintile LS daily returns + per-day membership-churn turnover.
 
     Churn is the mean symmetric-difference fraction of the two legs — a
     participation proxy, not dollar turnover; declared as such in provenance.
     """
-    joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
-    days = sorted(
-        d for d in set(joined["trade_date"].to_list()) if d in universe_by_day
+    import polars as pl
+
+    if _prejoined is not None:
+        filtered = _prejoined
+        if _all_days is not None:
+            all_days = _all_days
+        else:
+            u_days_set = _universe_days_aligned(filtered, universe_by_day)
+            all_days = sorted(d for d in set(filtered["trade_date"].to_list()) if d in u_days_set)
+    else:
+        joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+        if joined.is_empty():
+            return [], {}
+        u_df = _make_universe_frame(joined, universe_by_day)
+        filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
+        u_days_set = _universe_days_aligned(joined, universe_by_day)
+        all_days = sorted(d for d in set(joined["trade_date"].to_list()) if d in u_days_set)
+
+    need = n_groups * 4
+
+    if filtered.is_empty():
+        return [], {}
+
+    with_counts = filtered.with_columns(
+        pl.len().over("trade_date").alias("_day_count")
+    ).filter(pl.col("_day_count") >= need)
+
+    if with_counts.is_empty():
+        return [], {}
+
+    ranked = with_counts.with_columns(
+        pl.col("_score").rank(method="ordinal").over("trade_date").alias("_rk")
+    ).with_columns(
+        ((pl.col("_rk") - 1) * n_groups // pl.col("_day_count")).alias("_bucket")
     )
+
+    daily_agg = (
+        ranked.group_by("trade_date")
+        .agg(
+            pl.col("_fwd_ret").filter(pl.col("_bucket") == 0).mean().alias("long_ret"),
+            pl.col("_fwd_ret").filter(pl.col("_bucket") == n_groups - 1).mean().alias("short_ret"),
+            pl.col("ts_code").filter(pl.col("_bucket") == 0).alias("long_codes"),
+            pl.col("ts_code").filter(pl.col("_bucket") == n_groups - 1).alias("short_codes"),
+        )
+        .sort("trade_date")
+    )
+
+    day_set_valid = set(daily_agg["trade_date"].to_list())
+    daily_dict = {r["trade_date"]: r for r in daily_agg.iter_rows(named=True)}
+
     series: list[tuple[Any, float]] = []
-    prev_members: tuple[set[str], set[str]] | None = None
     turnover_by_day: dict[Any, float] = {}
-    for day in days:
-        members = universe_by_day[day]
-        group = joined.filter(joined["trade_date"] == day)
-        group = group.filter(group["ts_code"].is_in(sorted(members)))
-        need = n_groups * 4
-        if group.height < need:
+    prev_members: tuple[set[str], set[str]] | None = None
+
+    for day in all_days:
+        if day not in day_set_valid:
             if prev_members is not None:
                 prev_members = None
             continue
-        ranked = group.with_columns(group["_score"].rank(method="ordinal").alias("_rk"))
-        bucket = (ranked["_rk"] - 1) * n_groups // ranked.height
-        ranked = ranked.with_columns(bucket.alias("_bucket"))
-        long_leg = set(ranked.filter(ranked["_bucket"] == 0)["ts_code"].to_list())
-        short_leg = set(ranked.filter(ranked["_bucket"] == n_groups - 1)["ts_code"].to_list())
-        long_ret = group.filter(group["ts_code"].is_in(sorted(long_leg)))["_fwd_ret"].mean() or 0.0
-        short_ret = group.filter(group["ts_code"].is_in(sorted(short_leg)))["_fwd_ret"].mean() or 0.0
-        ls = float(long_ret - short_ret)
+        row = daily_dict[day]
+        l_ret = row["long_ret"] or 0.0
+        s_ret = row["short_ret"] or 0.0
+        ls = float(l_ret - s_ret)
+        long_leg = set(row["long_codes"])
+        short_leg = set(row["short_codes"])
+
         if prev_members is not None:
             churn_long = len(long_leg ^ prev_members[0]) / max(len(long_leg), 1)
             churn_short = len(short_leg ^ prev_members[1]) / max(len(short_leg), 1)
             turnover_by_day[day] = (churn_long + churn_short) / 2.0
         prev_members = (long_leg, short_leg)
         series.append((day, ls))
+
     return series, turnover_by_day
 
 
@@ -492,10 +625,27 @@ def _scoped_universe(
 def _factor_artifacts(
     scores: Any, forwards: Any, scoped_universe: dict[Any, set[str]]
 ) -> dict[str, Any]:
+    joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+    if joined.is_empty():
+        return {
+            "ic_vals": [],
+            "rank_vals": [],
+            "ls": ([], {}),
+        }
+    u_df = _make_universe_frame(joined, scoped_universe)
+    filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
+    if filtered.is_empty():
+        return {
+            "ic_vals": [],
+            "rank_vals": [],
+            "ls": ([], {}),
+        }
+    u_days_set = _universe_days_aligned(joined, scoped_universe)
+    all_days = sorted(d for d in set(joined["trade_date"].to_list()) if d in u_days_set)
     return {
-        "ic_vals": _daily_ic(scores, forwards, scoped_universe, spearman=False),
-        "rank_vals": _daily_ic(scores, forwards, scoped_universe, spearman=True),
-        "ls": _layered_long_short(scores, forwards, scoped_universe),
+        "ic_vals": _daily_ic(scores, forwards, scoped_universe, spearman=False, _prejoined=filtered),
+        "rank_vals": _daily_ic(scores, forwards, scoped_universe, spearman=True, _prejoined=filtered),
+        "ls": _layered_long_short(scores, forwards, scoped_universe, _prejoined=filtered, _all_days=all_days),
     }
 
 
@@ -524,6 +674,26 @@ def _neutralize_scores(frame: Any, name: str, controls: list[str]) -> Any:
             how="inner",
         )
     joined = joined.drop_nulls(subset=["_score", *[f"_c{i}" for i in range(len(controls))]])
+
+    if joined.is_empty():
+        return joined.select(["trade_date", "ts_code", "_score"])
+
+    if not controls:
+        y = pl.col("_score")
+        resid = y - y.mean().over("trade_date")
+        return joined.with_columns(resid.alias("_score")).select(["trade_date", "ts_code", "_score"])
+
+    if len(controls) == 1:
+        y = pl.col("_score")
+        x = pl.col("_c0")
+        dy = y - y.mean().over("trade_date")
+        dx = x - x.mean().over("trade_date")
+        var_x = (dx * dx).mean().over("trade_date")
+        cov_xy = (dx * dy).mean().over("trade_date")
+        beta = pl.when(var_x > 1e-12).then(cov_xy / var_x).otherwise(0.0)
+        resid = dy - beta * dx
+        return joined.with_columns(resid.alias("_score")).select(["trade_date", "ts_code", "_score"])
+
     control_cols = [f"_c{i}" for i in range(len(controls))]
 
     def _resid(group: "pl.DataFrame") -> "pl.DataFrame":
@@ -621,7 +791,7 @@ def run_bench(
             universe_by_day_all[day] = set(members)
 
     forwards = _forward_returns(frame)
-    from finaince.eval.pit_core import metrics_for_window, score_expression
+    from finaince.eval.pit_core import TURNOVER_MODEL, score_expression
 
     table: list[dict[str, Any]] = []
     artifacts_by_factor: dict[str, dict[str, dict[str, Any]]] = {}
@@ -647,10 +817,27 @@ def run_bench(
         factor_arts: dict[str, dict[str, Any]] = {}
         for label, (w_start, w_end) in windows.items():
             scoped = _scoped_universe(universe_by_day_all, w_start, w_end, embargo=embargo)
-            factor_arts[label] = _factor_artifacts(scores, forwards, scoped)
-            row[label] = metrics_for_window(
-                scores, forwards, universe_by_day_all, w_start, w_end, cost_bps, embargo=embargo
-            )
+            arts = _factor_artifacts(scores, forwards, scoped)
+            factor_arts[label] = arts
+            m = _metrics_from_artifacts(arts, cost_bps)
+            names: set[str] = set()
+            for members in scoped.values():
+                names.update(members)
+            m["n_names"] = len(names)
+            m["n_days"] = m.get("days")
+            m["cost_bps"] = cost_bps
+            m["turnover_model"] = TURNOVER_MODEL
+            m["engine"] = "pit_core"
+            m["window_start"] = w_start.isoformat()
+            m["window_end"] = w_end.isoformat()
+            m["embargo_last_day"] = embargo
+            m["is_start"] = is_start
+            m["is_end"] = is_end
+            m["oos_start"] = oos_start
+            m["oos_end"] = oos_end
+            if "icir" not in m and "ic_ir" in m:
+                m["icir"] = m["ic_ir"]
+            row[label] = m
         artifacts_by_factor[name] = factor_arts
         table.append(row)
 

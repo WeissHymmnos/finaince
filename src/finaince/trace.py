@@ -6,6 +6,7 @@ import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 _DDL = """
@@ -19,19 +20,32 @@ CREATE TABLE IF NOT EXISTS trace_events (
     error TEXT,
     metrics_json TEXT,
     extra_json TEXT,
-    created_at TEXT
+    created_at TEXT,
+    hypothesis TEXT
 );
 """
 
 
-def _connect() -> sqlite3.Connection:
-    from finaince.catalog.store import FactorCatalog
+def _migrate_trace(conn: sqlite3.Connection) -> None:
     from finaince.db import ensure_columns
 
-    conn = sqlite3.connect(FactorCatalog().db_path)
-    conn.executescript(_DDL)
     ensure_columns(conn, "trace_events", [("hypothesis", "TEXT")])
-    return conn
+
+
+def _trace_db_path() -> Path:
+    from finaince.settings import get_settings
+
+    path = Path(get_settings().platform_db)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _connect(db_path: Path | str | None = None):
+    from finaince.db import ensure_database_initialized, managed_connection
+
+    path = _trace_db_path() if db_path is None else Path(db_path)
+    ensure_database_initialized(path, _DDL, migrations=_migrate_trace)
+    return managed_connection(path)
 
 
 def last_event() -> dict[str, Any] | None:

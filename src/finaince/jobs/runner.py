@@ -16,7 +16,24 @@ from pathlib import Path
 from typing import Any, Callable
 
 from finaince.compat import current_pgid, pid_alive, popen_detached, terminate_process_tree
-from finaince.db import ensure_columns
+from finaince.db import ensure_columns, ensure_database_initialized, managed_connection
+
+_JOBS_DDL = """
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    kind TEXT,
+    status TEXT,
+    payload_json TEXT,
+    result_json TEXT,
+    error TEXT,
+    engine_run_id TEXT,
+    pid INTEGER,
+    pgid INTEGER,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, kind);
+"""
 
 
 def _now() -> str:
@@ -31,25 +48,7 @@ def _db_path() -> Path:
     return path
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id TEXT PRIMARY KEY,
-            kind TEXT,
-            status TEXT,
-            payload_json TEXT,
-            result_json TEXT,
-            error TEXT,
-            engine_run_id TEXT,
-            pid INTEGER,
-            pgid INTEGER,
-            created_at TEXT,
-            updated_at TEXT
-        )
-        """
-    )
+def _migrate_jobs(conn: sqlite3.Connection) -> None:
     ensure_columns(
         conn,
         "jobs",
@@ -59,11 +58,12 @@ def _connect() -> sqlite3.Connection:
             ("pgid", "INTEGER"),
         ],
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, kind)"
-    )
-    conn.commit()
-    return conn
+
+
+def _connect():
+    path = _db_path()
+    ensure_database_initialized(path, _JOBS_DDL, migrations=_migrate_jobs)
+    return managed_connection(path)
 
 
 def _row_to_dict(row: sqlite3.Row | tuple) -> dict[str, Any]:

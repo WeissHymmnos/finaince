@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from finaince.sdk_ext import build_claude_agent_options, try_live_query
+from finaince.sdk_ext import _safe_run_async, build_claude_agent_options, try_live_query
 
 
 def run_research_desk(prompt: str, *, max_turns: int | None = 16) -> dict[str, Any]:
@@ -19,8 +19,6 @@ def run_research_desk(prompt: str, *, max_turns: int | None = 16) -> dict[str, A
             fallback["error_type"] = type(exc).__name__
             fallback["error"] = str(exc)
         return fallback
-
-    import asyncio
 
     options = build_claude_agent_options()
     if max_turns is not None:
@@ -45,7 +43,7 @@ def run_research_desk(prompt: str, *, max_turns: int | None = 16) -> dict[str, A
                 texts.append(str(message.result))
 
     try:
-        asyncio.run(_run())
+        _safe_run_async(_run)
     except Exception as exc:  # noqa: BLE001
         fallback = try_live_query(prompt)
         fallback["prompt"] = prompt

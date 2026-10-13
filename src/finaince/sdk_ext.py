@@ -8,6 +8,8 @@ functions; they do not reimplement them.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -177,7 +179,9 @@ def handle_search_library(
     {"factors": list},
 )
 async def cull_factor_pool_tool(args: dict[str, Any]) -> dict[str, Any]:
-    return _json_content(handle_cull_factor_pool(list(args.get("factors") or [])))
+    factors = list(args.get("factors") or [])
+    res = await asyncio.to_thread(handle_cull_factor_pool, factors)
+    return _json_content(res)
 
 
 @tool(
@@ -186,12 +190,10 @@ async def cull_factor_pool_tool(args: dict[str, Any]) -> dict[str, Any]:
     {"metrics": dict, "factor_ic": float},
 )
 async def score_factor_tool(args: dict[str, Any]) -> dict[str, Any]:
-    return _json_content(
-        handle_score_factor(
-            dict(args.get("metrics") or {}),
-            factor_ic=float(args.get("factor_ic") or 0.0),
-        )
-    )
+    metrics = dict(args.get("metrics") or {})
+    factor_ic = float(args.get("factor_ic") or 0.0)
+    res = await asyncio.to_thread(handle_score_factor, metrics, factor_ic=factor_ic)
+    return _json_content(res)
 
 
 @tool(
@@ -200,7 +202,9 @@ async def score_factor_tool(args: dict[str, Any]) -> dict[str, Any]:
     {"pdf_path": str},
 )
 async def reproduce_report_tool(args: dict[str, Any]) -> dict[str, Any]:
-    return _json_content(handle_reproduce_report(str(args.get("pdf_path") or "")))
+    pdf_path = str(args.get("pdf_path") or "")
+    res = await asyncio.to_thread(handle_reproduce_report, pdf_path)
+    return _json_content(res)
 
 
 @tool(
@@ -209,7 +213,9 @@ async def reproduce_report_tool(args: dict[str, Any]) -> dict[str, Any]:
     {"expression": str},
 )
 async def validate_expression_tool(args: dict[str, Any]) -> dict[str, Any]:
-    return _json_content(handle_validate_expression(str(args.get("expression") or "")))
+    expr = str(args.get("expression") or "")
+    res = await asyncio.to_thread(handle_validate_expression, expr)
+    return _json_content(res)
 
 
 @tool(
@@ -221,9 +227,9 @@ async def search_library_tool(args: dict[str, Any]) -> dict[str, Any]:
     style = args.get("style") or None
     if style == "":
         style = None
-    return _json_content(
-        handle_search_library(query=str(args.get("query") or ""), style=style)
-    )
+    query = str(args.get("query") or "")
+    res = await asyncio.to_thread(handle_search_library, query=query, style=style)
+    return _json_content(res)
 
 
 @tool(
@@ -237,7 +243,9 @@ async def catalog_list_tool(args: dict[str, Any]) -> dict[str, Any]:
     source = args.get("source") or None
     if source == "":
         source = None
-    return _json_content(handle_catalog_list(query=str(args.get("query") or ""), source=source))
+    query = str(args.get("query") or "")
+    res = await asyncio.to_thread(handle_catalog_list, query=query, source=source)
+    return _json_content(res)
 
 
 @tool(
@@ -248,12 +256,10 @@ async def catalog_list_tool(args: dict[str, Any]) -> dict[str, Any]:
 async def eval_expression_tool(args: dict[str, Any]) -> dict[str, Any]:
     from finaince.tools import handle_eval_expression
 
-    return _json_content(
-        handle_eval_expression(
-            str(args.get("expression") or ""),
-            dialect=str(args.get("dialect") or "repro_polars"),
-        )
-    )
+    expr = str(args.get("expression") or "")
+    dialect = str(args.get("dialect") or "repro_polars")
+    res = await asyncio.to_thread(handle_eval_expression, expr, dialect=dialect)
+    return _json_content(res)
 
 
 @tool(
@@ -264,9 +270,10 @@ async def eval_expression_tool(args: dict[str, Any]) -> dict[str, Any]:
 async def promote_factor_tool(args: dict[str, Any]) -> dict[str, Any]:
     from finaince.tools import handle_promote
 
-    return _json_content(
-        handle_promote(str(args.get("catalog_id") or ""), direction=str(args.get("direction") or "to_pool"))
-    )
+    cat_id = str(args.get("catalog_id") or "")
+    direction = str(args.get("direction") or "to_pool")
+    res = await asyncio.to_thread(handle_promote, cat_id, direction=direction)
+    return _json_content(res)
 
 
 @tool(
@@ -277,7 +284,9 @@ async def promote_factor_tool(args: dict[str, Any]) -> dict[str, Any]:
 async def review_approve_tool(args: dict[str, Any]) -> dict[str, Any]:
     from finaince.tools import handle_review_approve
 
-    return _json_content(handle_review_approve(str(args.get("promotion_id") or "")))
+    promo_id = str(args.get("promotion_id") or "")
+    res = await asyncio.to_thread(handle_review_approve, promo_id)
+    return _json_content(res)
 
 
 @tool(
@@ -288,7 +297,9 @@ async def review_approve_tool(args: dict[str, Any]) -> dict[str, Any]:
 async def review_reject_tool(args: dict[str, Any]) -> dict[str, Any]:
     from finaince.tools import handle_review_reject
 
-    return _json_content(handle_review_reject(str(args.get("promotion_id") or "")))
+    promo_id = str(args.get("promotion_id") or "")
+    res = await asyncio.to_thread(handle_review_reject, promo_id)
+    return _json_content(res)
 
 
 @tool(
@@ -299,7 +310,8 @@ async def review_reject_tool(args: dict[str, Any]) -> dict[str, Any]:
 async def list_jobs_tool(args: dict[str, Any]) -> dict[str, Any]:
     from finaince.tools import handle_list_jobs
 
-    return _json_content(handle_list_jobs())
+    res = await asyncio.to_thread(handle_list_jobs)
+    return _json_content(res)
 
 
 @tool(
@@ -310,7 +322,8 @@ async def list_jobs_tool(args: dict[str, Any]) -> dict[str, Any]:
 async def doctor_tool(args: dict[str, Any]) -> dict[str, Any]:
     from finaince.tools import handle_doctor
 
-    return _json_content(handle_doctor())
+    res = await asyncio.to_thread(handle_doctor)
+    return _json_content(res)
 
 
 @tool(
@@ -324,7 +337,8 @@ async def discover_swarm_tool(args: dict[str, Any]) -> dict[str, Any]:
     sync = args.get("sync")
     if sync is None:
         sync = True
-    return _json_content(handle_discover_swarm(sync=bool(sync)))
+    res = await asyncio.to_thread(handle_discover_swarm, sync=bool(sync))
+    return _json_content(res)
 
 
 @tool(
@@ -341,7 +355,8 @@ async def recent_failures_tool(args: dict[str, Any]) -> dict[str, Any]:
     limit = args.get("limit")
     if limit is None:
         limit = 5
-    return _json_content(handle_recent_failures(error=error, limit=int(limit)))
+    res = await asyncio.to_thread(handle_recent_failures, error=error, limit=int(limit))
+    return _json_content(res)
 
 
 @tool(
@@ -361,13 +376,13 @@ async def research_context_tool(args: dict[str, Any]) -> dict[str, Any]:
     lesson_limit = args.get("lesson_limit")
     if lesson_limit is None:
         lesson_limit = 5
-    return _json_content(
-        handle_research_context(
-            error_prefix=error_prefix,
-            sample_limit=int(sample_limit),
-            lesson_limit=int(lesson_limit),
-        )
+    res = await asyncio.to_thread(
+        handle_research_context,
+        error_prefix=error_prefix,
+        sample_limit=int(sample_limit),
+        lesson_limit=int(lesson_limit),
     )
+    return _json_content(res)
 
 
 CUSTOM_TOOLS = [
@@ -571,6 +586,26 @@ def describe_session_options(options: ClaudeAgentOptions | None = None) -> dict[
     }
 
 
+def _safe_run_async(target: Any) -> Any:
+    """Safely execute an async coroutine or coroutine factory without RuntimeError when called in a running loop."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    def _execute() -> Any:
+        coro = target() if (inspect.iscoroutinefunction(target) or callable(target)) else target
+        return asyncio.run(coro)
+
+    if loop is not None and loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_execute).result()
+    else:
+        return _execute()
+
+
 def try_live_query(prompt: str) -> dict[str, Any]:
     """Attempt ``query()``. Missing CLI/credentials is an environment failure."""
     if not _HAS_SDK:
@@ -579,7 +614,6 @@ def try_live_query(prompt: str) -> dict[str, Any]:
             "error_type": "ModuleNotFoundError",
             "error": "claude_agent_sdk is not installed",
         }
-    import asyncio
 
     from claude_agent_sdk import query
 
@@ -590,7 +624,7 @@ def try_live_query(prompt: str) -> dict[str, Any]:
         return messages
 
     try:
-        messages = asyncio.run(_run())
+        messages = _safe_run_async(_run)
     except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,

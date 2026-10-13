@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -175,8 +177,12 @@ def create_app() -> Any:
         allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     )
 
-    @app.get("/api/v1/health")
-    def health() -> dict[str, Any]:
+    _health_cache: dict[str, Any] = {}
+    _health_cache_ts: float = 0.0
+    _health_updating: bool = False
+    _background_tasks: set[asyncio.Task[Any]] = set()
+
+    def _compute_health() -> dict[str, Any]:
         from finaince.obs import jobs_degraded
         from finaince.settings import doctor_report
 
@@ -191,6 +197,47 @@ def create_app() -> Any:
             "isolator": doc.get("isolator"),
             "qlib_child": qlib_child,
         }
+
+    try:
+        _health_cache = _compute_health()
+        _health_cache_ts = time.monotonic()
+    except Exception:
+        pass
+
+    async def _refresh_health_bg() -> None:
+        nonlocal _health_cache, _health_cache_ts, _health_updating
+        try:
+            res = await asyncio.to_thread(_compute_health)
+            _health_cache = res
+            _health_cache_ts = time.monotonic()
+        except Exception:
+            pass
+        finally:
+            _health_updating = False
+
+    @app.get("/api/v1/health")
+    async def health() -> dict[str, Any]:
+        nonlocal _health_cache, _health_cache_ts, _health_updating
+        now = time.monotonic()
+        if not _health_cache:
+            if not _health_updating:
+                _health_updating = True
+                try:
+                    _health_cache = await asyncio.to_thread(_compute_health)
+                    _health_cache_ts = time.monotonic()
+                except Exception:
+                    pass
+                finally:
+                    _health_updating = False
+            return _health_cache
+
+        if (now - _health_cache_ts > 1.0) and not _health_updating:
+            _health_updating = True
+            task = asyncio.create_task(_refresh_health_bg())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+        return _health_cache
 
     @app.get("/api/v1/catalog")
     def catalog(
@@ -254,22 +301,21 @@ def create_app() -> Any:
         return {"items": rows, "count": len(rows)}
 
     @app.post("/api/v1/eval")
-    def eval_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    async def eval_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         from finaince.eval.router import EvalRequest, evaluate
         from finaince.runtime import resolve_data_source
 
         backend = str(body.get("data_backend") or body.get("backend") or "auto")
         if backend == "auto":
             backend = resolve_data_source()
-        result = evaluate(
-            EvalRequest(
-                expression=str(body.get("expression") or ""),
-                dialect=str(body.get("dialect") or "repro_polars"),
-                data_backend=backend,
-                start=body.get("start"),
-                end=body.get("end"),
-            )
+        req = EvalRequest(
+            expression=str(body.get("expression") or ""),
+            dialect=str(body.get("dialect") or "repro_polars"),
+            data_backend=backend,
+            start=body.get("start"),
+            end=body.get("end"),
         )
+        result = await asyncio.to_thread(evaluate, req)
         return {
             "ok": result.ok,
             "dialect": result.dialect,
@@ -324,10 +370,10 @@ def create_app() -> Any:
         return approve(promotion_id, override=None, adversary=True)
 
     @app.post("/api/v1/review/{promotion_id}/adversary")
-    def review_adversary(request: Request, promotion_id: str) -> dict[str, Any]:
+    async def review_adversary(request: Request, promotion_id: str) -> dict[str, Any]:
         from finaince.review.adversary import adversarial_review
 
-        return adversarial_review(promotion_id)
+        return await asyncio.to_thread(adversarial_review, promotion_id)
 
     @app.post("/api/v1/review/{promotion_id}/reject")
     def review_reject(request: Request, promotion_id: str) -> dict[str, Any]:
@@ -336,7 +382,7 @@ def create_app() -> Any:
         return reject(promotion_id)
 
     @app.post("/api/v1/reproduce")
-    def reproduce_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    async def reproduce_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         from finaince.auth import pdf_path_allowed
         from finaince.jobs.runner import run_reproduce_job
 
@@ -346,7 +392,7 @@ def create_app() -> Any:
         if not pdf_path_allowed(str(pdf)):
             raise HTTPException(status_code=403, detail="pdf_path must be under FINAINCE_PDF_ROOT")
         sync = bool(body.get("sync", True))
-        return run_reproduce_job(str(pdf), sync=sync)
+        return await asyncio.to_thread(run_reproduce_job, str(pdf), sync=sync)
 
     @app.post("/api/v1/jobs/{job_id}/cancel")
     def cancel_job(request: Request, job_id: str) -> dict[str, Any]:
@@ -355,13 +401,14 @@ def create_app() -> Any:
         return cancel(job_id)
 
     @app.post("/api/v1/agent")
-    def agent_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    async def agent_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         from finaince.agent import run_research_desk
 
         prompt = str(body.get("prompt") or "").strip()
         if not prompt:
             raise HTTPException(400, "prompt required")
-        return run_research_desk(prompt, max_turns=int(body.get("max_turns") or 16))
+        max_turns = int(body.get("max_turns") or 16)
+        return await asyncio.to_thread(run_research_desk, prompt, max_turns=max_turns)
 
     @app.get("/api/v1/trace")
     def trace_route(request: Request, limit: int = 50) -> dict[str, Any]:
@@ -377,7 +424,7 @@ def create_app() -> Any:
         return run_locked_baseline()
 
     @app.get("/api/v1/bench")
-    def bench_route(
+    async def bench_route(
         request: Request,
         is_start: str = "2019-01-01",
         is_end: str = "2023-12-31",
@@ -387,10 +434,17 @@ def create_app() -> Any:
     ) -> dict[str, Any]:
         from finaince.data_track import run_bench
 
-        return run_bench(is_start=is_start, is_end=is_end, oos_start=oos_start, oos_end=oos_end, cost_bps=cost_bps)
+        return await asyncio.to_thread(
+            run_bench,
+            is_start=is_start,
+            is_end=is_end,
+            oos_start=oos_start,
+            oos_end=oos_end,
+            cost_bps=cost_bps,
+        )
 
     @app.post("/api/v1/impl")
-    def impl_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    async def impl_route(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         from finaince.jobs.runner import run_impl_job
 
         source = str(body.get("source") or "")
@@ -398,7 +452,9 @@ def create_app() -> Any:
             raise HTTPException(400, "source required")
         if len(source) > 20_000:
             raise HTTPException(413, "source too large")
-        return run_impl_job(source, name=str(body.get("name") or "isolated"), universe=str(body.get("universe") or "local_panel"))
+        name = str(body.get("name") or "isolated")
+        universe = str(body.get("universe") or "local_panel")
+        return await asyncio.to_thread(run_impl_job, source, name=name, universe=universe)
 
     @app.post("/api/v1/impl/needs")
     def impl_needs_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -407,7 +463,7 @@ def create_app() -> Any:
         return fulfill_needs_impl(body or {})
 
     @app.post("/api/v1/loop")
-    def loop_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def loop_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
         from finaince.jobs.runner import run_loop_job
 
         steps = int((body or {}).get("steps") or 2)
@@ -422,7 +478,9 @@ def create_app() -> Any:
         if isinstance(raw_exprs, list):
             cleaned = [str(e).strip() for e in raw_exprs if str(e).strip()]
             expressions = cleaned or None
-        return run_loop_job(steps=steps, sync=sync, expressions=expressions, workers=workers)
+        return await asyncio.to_thread(
+            run_loop_job, steps=steps, sync=sync, expressions=expressions, workers=workers
+        )
 
     _attach_workbench_root(app)
 

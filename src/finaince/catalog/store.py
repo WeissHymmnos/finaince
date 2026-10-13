@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from finaince.db import ensure_columns
+from finaince.db import ensure_columns, ensure_database_initialized, managed_connection
 from finaince.domain.factor import FactorRecord
 from finaince.settings import get_settings
 
@@ -25,8 +25,10 @@ CREATE TABLE IF NOT EXISTS factor_catalog (
     record_json TEXT NOT NULL,
     created_at TEXT,
     updated_at TEXT,
+    expr_hash TEXT,
     UNIQUE(source, source_ref)
 );
+CREATE INDEX IF NOT EXISTS idx_factor_catalog_expr_hash ON factor_catalog(expr_hash);
 CREATE TABLE IF NOT EXISTS promotion_events (
     id TEXT PRIMARY KEY,
     catalog_id TEXT,
@@ -39,7 +41,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT,
     action TEXT,
-    detail TEXT
+    detail TEXT,
+    actor TEXT,
+    prev_hash TEXT,
+    hash TEXT
 );
 """
 
@@ -49,18 +54,18 @@ class FactorCatalog:
         settings = get_settings()
         self.db_path = Path(db_path or settings.platform_db)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.executescript(_DDL)
-            ensure_columns(conn, "factor_catalog", [("expr_hash", "TEXT")])
-            self._migrate_unknown_engine(conn)
-            conn.commit()
+        ensure_database_initialized(
+            self.db_path,
+            _DDL,
+            migrations=self._migrate_unknown_engine,
+        )
 
     def upsert(self, record: FactorRecord) -> FactorRecord:
         now = datetime.now(UTC).isoformat()
         record.updated_at = datetime.now(UTC)
         payload = record.model_dump(mode="json")
         expr_hash = self._hash_expression(record)
-        with sqlite3.connect(self.db_path) as conn:
+        with managed_connection(self.db_path) as conn:
             existing = conn.execute(
                 "SELECT id, record_json FROM factor_catalog WHERE source=? AND source_ref=?",
                 (record.lineage.source, record.lineage.source_ref),
@@ -140,8 +145,7 @@ class FactorCatalog:
             return []
         if not digest:
             return []
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_factor_catalog_expr_hash ON factor_catalog(expr_hash)")
+        with managed_connection(self.db_path) as conn:
             rows = conn.execute(
                 "SELECT id, source, status, formula FROM factor_catalog WHERE expr_hash=?",
                 (digest,),
@@ -151,7 +155,10 @@ class FactorCatalog:
     @staticmethod
     def _migrate_unknown_engine(conn: sqlite3.Connection) -> None:
         """Stamp pre-contract rows engine=unknown. Never flips status to ready."""
-        rows = conn.execute("SELECT id, record_json, status FROM factor_catalog").fetchall()
+        ensure_columns(conn, "factor_catalog", [("expr_hash", "TEXT")])
+        rows = conn.execute(
+            "SELECT id, record_json, status FROM factor_catalog WHERE record_json NOT LIKE '%\"engine\"%'"
+        ).fetchall()
         for catalog_id, raw, status in rows:
             try:
                 data = json.loads(raw)
@@ -169,7 +176,7 @@ class FactorCatalog:
             )
 
     def get(self, catalog_id: str) -> FactorRecord | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with managed_connection(self.db_path) as conn:
             row = conn.execute(
                 "SELECT record_json FROM factor_catalog WHERE id=?",
                 (catalog_id,),
@@ -202,7 +209,7 @@ class FactorCatalog:
             like = f"%{query}%"
             args.extend([like, like, like])
         sql += " ORDER BY updated_at DESC"
-        with sqlite3.connect(self.db_path) as conn:
+        with managed_connection(self.db_path) as conn:
             rows = conn.execute(sql, args).fetchall()
         records = [FactorRecord.model_validate(json.loads(r[0])) for r in rows]
         if style:
@@ -220,7 +227,7 @@ class FactorCatalog:
         import uuid
 
         pid = uuid.uuid4().hex
-        with sqlite3.connect(self.db_path) as conn:
+        with managed_connection(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO promotion_events (id, catalog_id, direction, decision, gate_json, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -236,7 +243,7 @@ class FactorCatalog:
             sql += " WHERE decision=?"
             args.append(decision)
         sql += " ORDER BY created_at"
-        with sqlite3.connect(self.db_path) as conn:
+        with managed_connection(self.db_path) as conn:
             rows = conn.execute(sql, args).fetchall()
         out = []
         for row in rows:
@@ -253,7 +260,7 @@ class FactorCatalog:
         return out
 
     def update_promotion(self, promo_id: str, decision: str) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with managed_connection(self.db_path) as conn:
             conn.execute(
                 "UPDATE promotion_events SET decision=? WHERE id=?",
                 (decision, promo_id),

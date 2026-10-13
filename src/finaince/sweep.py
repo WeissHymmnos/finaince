@@ -441,40 +441,79 @@ def _layered_long_short_cadence(
     definition as the bench core, charged on refresh days only. Held days get
     explicit zero-churn entries so per-day cost application stays honest.
     """
+    import polars as pl
+
+    from finaince.data_track import _make_universe_frame, _universe_days_aligned
+
     joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
-    days = sorted(d for d in set(joined["trade_date"].to_list()) if d in universe_by_day)
+    if joined.is_empty():
+        return [], {}
+    u_df = _make_universe_frame(joined, universe_by_day)
+    filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
+    need = n_groups * 4
+
+    if filtered.is_empty():
+        return [], {}
+
+    with_counts = filtered.with_columns(
+        pl.len().over("trade_date").alias("_day_count")
+    ).filter(pl.col("_day_count") >= need)
+
+    if with_counts.is_empty():
+        return [], {}
+
+    ranked = with_counts.with_columns(
+        pl.col("_score").rank(method="ordinal").over("trade_date").alias("_rk")
+    ).with_columns(
+        ((pl.col("_rk") - 1) * n_groups // pl.col("_day_count")).alias("_bucket")
+    )
+
+    daily_agg = (
+        ranked.group_by("trade_date")
+        .agg(
+            pl.col("ts_code").filter(pl.col("_bucket") == 0).alias("long_codes"),
+            pl.col("ts_code").filter(pl.col("_bucket") == n_groups - 1).alias("short_codes"),
+        )
+        .sort("trade_date")
+    )
+
+    u_days_set = _universe_days_aligned(joined, universe_by_day)
+    all_days = sorted(d for d in set(joined["trade_date"].to_list()) if d in u_days_set)
+    day_set_valid = set(daily_agg["trade_date"].to_list())
+    daily_legs_dict = {r["trade_date"]: r for r in daily_agg.iter_rows(named=True)}
+
+    ret_dict: dict[Any, dict[str, float]] = {}
+    for d, c, r in zip(
+        filtered["trade_date"].to_list(),
+        filtered["ts_code"].to_list(),
+        filtered["_fwd_ret"].to_list(),
+    ):
+        ret_dict.setdefault(d, {})[c] = r
+
     series: list[tuple[Any, float]] = []
     turnover_by_day: dict[Any, float] = {}
     prev_legs: tuple[set[str], set[str]] | None = None
     since_refresh = 0
-    for day in days:
-        members = universe_by_day[day]
-        group = joined.filter(joined["trade_date"] == day)
-        group = group.filter(group["ts_code"].is_in(sorted(members)))
-        if group.height < n_groups * 4:
+
+    for day in all_days:
+        if day not in day_set_valid:
             prev_legs = None
             continue
+        day_rets = ret_dict.get(day, {})
         if prev_legs is not None:
-            long_ret = (
-                group.filter(group["ts_code"].is_in(sorted(prev_legs[0])))["_fwd_ret"].mean()
-                or 0.0
-            )
-            short_ret = (
-                group.filter(group["ts_code"].is_in(sorted(prev_legs[1])))["_fwd_ret"].mean()
-                or 0.0
-            )
+            l_vals = [day_rets[c] for c in prev_legs[0] if c in day_rets]
+            s_vals = [day_rets[c] for c in prev_legs[1] if c in day_rets]
+            long_ret = sum(l_vals) / len(l_vals) if l_vals else 0.0
+            short_ret = sum(s_vals) / len(s_vals) if s_vals else 0.0
         else:
             long_ret = short_ret = 0.0
         ls = float(long_ret - short_ret)
         since_refresh += 1
+
         if prev_legs is None or since_refresh >= max(1, int(rebalance_every)):
-            ranked = group.with_columns(group["_score"].rank(method="ordinal").alias("_rk"))
-            bucket = (ranked["_rk"] - 1) * n_groups // ranked.height
-            ranked = ranked.with_columns(bucket.alias("_bucket"))
-            long_leg = set(ranked.filter(ranked["_bucket"] == 0)["ts_code"].to_list())
-            short_leg = set(
-                ranked.filter(ranked["_bucket"] == n_groups - 1)["ts_code"].to_list()
-            )
+            legs_row = daily_legs_dict[day]
+            long_leg = set(legs_row["long_codes"])
+            short_leg = set(legs_row["short_codes"])
             if prev_legs is not None:
                 churn_long = len(long_leg ^ prev_legs[0]) / max(len(long_leg), 1)
                 churn_short = len(short_leg ^ prev_legs[1]) / max(len(short_leg), 1)
@@ -486,6 +525,7 @@ def _layered_long_short_cadence(
         else:
             turnover_by_day[day] = 0.0
         series.append((day, ls))
+
     return series, turnover_by_day
 
 
