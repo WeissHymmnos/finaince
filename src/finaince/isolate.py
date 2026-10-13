@@ -95,7 +95,7 @@ def _child_command() -> list[str]:
 
 
 def _bwrap_command() -> list[str]:
-    argv = ["bwrap", "--unshare-all", "--share-net"]
+    argv = ["bwrap", "--unshare-all"]
     for bind in _bwrap_binds():
         argv += ["--ro-bind", bind, bind]
     argv += [
@@ -349,36 +349,60 @@ def upsert_isolated(result: dict[str, Any], *, universe: str = "local_panel") ->
     now = datetime.now(UTC)
     source_ref = f"iso_{abs(hash(result.get('name'))) % 10**10}"
     expression = str(result.get("expression") or "").strip()
-    ic = None
-    returns: dict[str, float] = {}
-    simulated = True
-    if expression:
-        from finaince.eval.router import EvalRequest, evaluate
+    if not expression:
+        return {"ok": False, "error": "not_scored", "catalog_id": None}
+    from finaince.eval.router import EvalRequest, evaluate
+    from finaince.loop import _pit_window
 
+    window = _pit_window()
+    if window is not None:
         ev = evaluate(
-            EvalRequest(expression=expression, dialect="repro_polars", universe=universe)
+            EvalRequest(
+                expression=expression,
+                dialect="repro_polars",
+                data_backend="pit",
+                universe=universe,
+                start=window[0],
+                end=window[1],
+                cost_bps=5.0,
+            )
         )
-        if ev.ok:
-            ic = finite_ic((ev.metrics or {}).get("ic_mean"))
-            raw = (ev.metrics or {}).get("daily_returns") or {}
-            if isinstance(raw, dict):
-                returns = {str(k): float(v) for k, v in raw.items()}
-            simulated = False
+    else:
+        ev = evaluate(EvalRequest(expression=expression, dialect="repro_polars", universe=universe))
+    if not ev.ok:
+        return {"ok": False, "error": ev.error or "not_scored", "catalog_id": None}
+    metrics = ev.metrics or {}
+    ic = finite_ic(metrics.get("ic", metrics.get("ic_mean")))
+    raw = metrics.get("daily_returns") or {}
+    returns = {str(k): float(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
     rec = FactorRecord(
         id=f"fac_{source_ref}",
         name=str(result.get("name") or "isolated"),
         expression=FactorExpression(
-            dialect="repro_polars" if expression else "python_sandbox",
-            text=expression or "compute(panel)",
-            validated=bool(expression),
+            dialect="repro_polars",
+            text=expression,
+            validated=True,
         ),
         universe=universe,
-        metrics=FactorMetrics(ic=ic),
+        engine=str(metrics.get("engine") or "engine_native"),
+        window_start=metrics.get("window_start"),
+        window_end=metrics.get("window_end"),
+        citable=bool(metrics.get("citable")),
+        turnover_model=metrics.get("turnover_model"),
+        metrics=FactorMetrics(
+            ic=ic,
+            rank_ic=finite_ic(metrics.get("rank_ic")),
+            icir=finite_ic(metrics.get("icir")),
+            rank_icir=finite_ic(metrics.get("rank_icir")),
+            sharpe=finite_ic(metrics.get("sharpe_ratio")),
+            sharpe_net=finite_ic(metrics.get("sharpe_net")),
+            cost_bps=finite_ic(metrics.get("cost_bps")),
+        ),
         daily_returns=returns,
         status="candidate",
         lineage=FactorLineage(source="manual", source_ref=source_ref, engine_db="isolate"),
         tags=["isolated", "python_sandbox"],
-        is_simulated=simulated,
+        is_simulated=False,
         created_at=now,
         updated_at=now,
     )

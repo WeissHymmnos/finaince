@@ -1,5 +1,7 @@
 # FinAlpha 与微软亚研 RD-Agent 的差距分析与改进方案
 
+> **历史文档（2026-10-12）。** 文中「已落地」指的是模块和单测存在，不是过夜研究产出已经成立。模型头拟合的是一条组合曲线的滞后项。哪台核的数字可以引用，以 [architecture.md](architecture.md) 为准。
+
 | 字段 | 值 |
 |------|-----|
 | 日期 | 2026-08-14（2026-08-14 晚按仓库补丁修订：A/B/C/D 骨架已进主链） |
@@ -58,7 +60,7 @@ FinAlpha 是**中国卖方研究台**：人打开 `finaince serve`，用 catalog
 - **平台壳**：`FactorRecord` catalog、`(dialect, backend)` eval、`promote → review → approve` fail-closed（`thin_panel` / `formula_proxy` / 空 IC / 空收益 / 相关）、JobRunner、同源 `/` + `/api/v1`、`finaince doctor`。
 - **Agent**：Claude Agent SDK + 进程内工具 + 发现/复现/复核三个 specialist。**一次 query，不是过夜 R/D 环。**
 - **知识**：chroma RAG + wiki vault + reproagent `report_knowledge` / feedback。**另有** `trace_events`：eval / job（reproduce、swarm、impl、loop）追加一条，后一条 `cites` 前一条 id。还不是带 hypothesis 正文的研发树。
-- **qlib**：3.12 上 `eval --dialect qlib` 走 in-process `qlib_child`（schema 不对的 `~/Documents/Data` 回退打包 `local_panel`）。`FINAINCE_QLIB_SUBPROCESS=1` 才用 3.10 子进程。doctor / health 报告 `isolator`、`qlib_child.via`。
+- **qlib**：3.12 上 `eval --dialect qlib` 走 in-process `qlib_child`（schema 不对的 `~/Documents/finance/data/samples` 回退打包 `local_panel`）。`FINAINCE_QLIB_SUBPROCESS=1` 才用 3.10 子进程。doctor / health 报告 `isolator`、`qlib_child.via`。
 - **工作台**：Catalog / Review / Reproduce / Agent / Swarm / Pool / Manual / Wiki 同源。
 - **已补骨架（2026-08-14）**：`finaince trace` / `GET /api/v1/trace`；`finaince impl` 冻结模块跑 `compute(panel)` 再 upsert catalog（仍过门禁）；`finaince loop` 交替 factor + thin long-short 组合曲线；空抽取 `no_factors`，能描述但译不了 `needs_impl`。
 

@@ -9,9 +9,18 @@ from finaince.sdk_ext import build_claude_agent_options, try_live_query
 
 def run_research_desk(prompt: str, *, max_turns: int | None = 16) -> dict[str, Any]:
     """One-shot agent turn. Missing claude CLI is an environment failure."""
-    import asyncio
+    try:
+        from claude_agent_sdk import ResultMessage, TextBlock, query
+    except ImportError as exc:
+        fallback = try_live_query(prompt)
+        fallback["prompt"] = prompt
+        fallback["desk"] = "FinAlpha"
+        if not fallback.get("ok"):
+            fallback["error_type"] = type(exc).__name__
+            fallback["error"] = str(exc)
+        return fallback
 
-    from claude_agent_sdk import ResultMessage, TextBlock, query
+    import asyncio
 
     options = build_claude_agent_options()
     if max_turns is not None:

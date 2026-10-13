@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
+try:
+    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
+except ImportError:
+    from finaince.sdk_ext import ClaudeAgentOptions, HookMatcher
 
 from finaince.sdk_ext import (
     CUSTOM_TOOLS,
@@ -221,3 +224,24 @@ def test_session_builder_registers_mcp_tools_and_hook() -> None:
     post = inspect_post_tool_use({"tool_name": "mcp__finaince__catalog_list", "tool_input": {}})
     assert post["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
     assert "catalog" in post["hookSpecificOutput"]["additionalContext"]
+
+
+def test_sdk_ext_fallback_when_sdk_missing() -> None:
+    from finaince.sdk_ext import (
+        _HAS_SDK,
+        CUSTOM_TOOLS,
+        allowed_mcp_tool_names,
+        describe_session_options,
+        try_live_query,
+    )
+
+    if not _HAS_SDK:
+        assert len(CUSTOM_TOOLS) == 15
+        assert len(allowed_mcp_tool_names()) == 15
+        desc = describe_session_options()
+        assert desc["available"] is False
+        assert len(desc["mcp_servers"]) == 1
+        assert desc["has_system_prompt"] is True
+        query_res = try_live_query("hello")
+        assert query_res["ok"] is False
+        assert query_res["error_type"] == "ModuleNotFoundError"

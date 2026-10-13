@@ -352,6 +352,12 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         sandbox = sandbox_backend()
     except Exception as exc:  # noqa: BLE001
         sandbox = {"error": str(exc)}
+    try:
+        from finaince.eval.cores import evaluation_cores
+
+        cores = evaluation_cores()
+    except Exception as exc:  # noqa: BLE001
+        cores = {"error": str(exc)}
     return {
         "product_name": cfg.product_name,
         "ok": ok,
@@ -399,6 +405,7 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
         "qlib_child": qlib_child,
         "data_track": data_track,
         "sandbox_backend": sandbox,
+        "evaluation_cores": cores,
     }
 
 

@@ -17,7 +17,12 @@ MOTIF = {"added_lines": 3, "removed_lines": 1, "changed_regions": 1, "signatures
 
 def test_record_and_recall_weighted_by_gate_survival() -> None:
     for _ in range(3):
-        out = pm.record_edit_outcome(error_prefix="ValueError: shape", motif=MOTIF, survived_gates=True)
+        out = pm.record_edit_outcome(
+            error_prefix="ValueError: shape",
+            motif=MOTIF,
+            survived_gates=True,
+            survived_adversary=True,
+        )
         assert out["ok"] is True
     pm.record_edit_outcome(error_prefix="ValueError: shape", motif=MOTIF, survived_gates=False)
 

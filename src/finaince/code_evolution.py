@@ -38,7 +38,7 @@ def compute(panel):
 def default_seed(name: str = "code_evo", expression: str = "", window: int = 5) -> str:
     return SEED_TEMPLATE.format(
         name=name,
-        expression=expression or "compute(panel)",
+        expression=expression or "Rank(Delta(close, 5))",
         window=max(2, int(window)),
     )
 

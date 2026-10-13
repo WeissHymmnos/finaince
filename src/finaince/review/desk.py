@@ -31,14 +31,8 @@ def promote(catalog_id: str, *, direction: str, yes: bool = False) -> dict[str, 
     return {"ok": True, "promotion_id": pid, "status": "review", "gates": gates, "confirmed": yes}
 
 
-def approve(promotion_id: str, *, override: list[str] | None = None, adversary: bool = False) -> dict[str, Any]:
+def approve(promotion_id: str, *, override: list[str] | None = None, adversary: bool = True) -> dict[str, Any]:
     from finaince.catalog.audit import append as audit_append
-
-    if adversary:
-        from finaince.review.adversary import adversarial_review
-        adv_res = adversarial_review(promotion_id)
-        if adv_res["verdict"] == "rejected":
-            return {"ok": False, "error": "adversary_rejected", "adversary": adv_res}
 
     cat = FactorCatalog()
     pending = [p for p in cat.list_promotions("pending") if p["id"] == promotion_id]
@@ -57,6 +51,13 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
         except Exception:
             pass
         return {"ok": False, "error": "gates_failed", "gates": gates}
+    adv_res: dict[str, Any] | None = None
+    if adversary:
+        from finaince.review.adversary import adversarial_review
+
+        adv_res = adversarial_review(promotion_id)
+        if adv_res["verdict"] == "rejected":
+            return {"ok": False, "error": "adversary_rejected", "adversary": adv_res, "gates": gates}
     if event["direction"] == "to_pool":
         if not rec.daily_returns:
             return {"ok": False, "error": "empty_returns", "gates": gates}
@@ -78,7 +79,7 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
     rec.status = "ready"
     cat.upsert(rec)
     cat.update_promotion(promotion_id, "approved")
-    if adversary:
+    if adversary and adv_res is not None:
         gates["adversary"] = adv_res
     gates["override"] = {
         "thin_panel": "thin_panel" in (override or []),

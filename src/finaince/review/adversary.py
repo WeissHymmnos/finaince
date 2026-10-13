@@ -27,7 +27,10 @@ def main():
         req = EvalRequest(
             expression=config["expression"],
             dialect=config["dialect"],
-            universe=config["universe"],
+            universe=config.get("universe") or "local_panel",
+            data_backend=config.get("data_backend") or "local",
+            start=config.get("start"),
+            end=config.get("end"),
             cost_bps=config.get("cost_bps", 0.0),
         )
         res = evaluate(req)
@@ -63,14 +66,21 @@ def adversarial_review(promotion_id: str, *, tol_rel: float = 0.05, tol_abs: flo
     if not rec:
         return {"ok": False, "verdict": "rejected", "checks": [], "error": "unknown promotion"}
 
-    cost_bps = rec.metrics.cost_drag or rec.metrics.extra.get("transaction_cost_bps", 0.0)
-    
+    if rec.metrics.cost_bps is not None:
+        cost_bps = float(rec.metrics.cost_bps)
+    else:
+        cost_bps = rec.metrics.cost_drag or rec.metrics.extra.get("transaction_cost_bps") or 0.0
+    data_backend = "pit" if rec.engine == "pit_core" else "local"
     config = {
         "expression": rec.expression.text,
         "dialect": rec.expression.dialect,
         "universe": rec.universe,
-        "cost_bps": cost_bps,
+        "data_backend": data_backend,
+        "cost_bps": float(cost_bps or 0.0),
     }
+    if data_backend == "pit" and rec.window_start and rec.window_end:
+        config["start"] = rec.window_start
+        config["end"] = rec.window_end
     
     checks = []
     
@@ -103,7 +113,9 @@ def adversarial_review(promotion_id: str, *, tol_rel: float = 0.05, tol_abs: flo
         
         # ic_match
         recorded_ic = rec.metrics.ic
-        child_ic = child_metrics.get("ic_mean")
+        child_ic = child_metrics.get("ic")
+        if child_ic is None:
+            child_ic = child_metrics.get("ic_mean")
         if recorded_ic is None or child_ic is None:
             checks.append({"name": "ic_match", "ok": False, "detail": "missing_ic"})
         else:
@@ -112,8 +124,10 @@ def adversarial_review(promotion_id: str, *, tol_rel: float = 0.05, tol_abs: flo
             checks.append({"name": "ic_match", "ok": diff <= allowed, "detail": f"diff={diff:.4f}"})
             
         # sharpe_match
-        recorded_sharpe = rec.metrics.sharpe
+        recorded_sharpe = rec.metrics.sharpe if rec.metrics.sharpe is not None else rec.metrics.sharpe_net
         child_sharpe = child_metrics.get("sharpe_ratio")
+        if child_sharpe is None:
+            child_sharpe = child_metrics.get("sharpe_net")
         if recorded_sharpe is None:
             checks.append({"name": "sharpe_match", "ok": True, "detail": "skip_missing_recorded"})
         elif child_sharpe is None:

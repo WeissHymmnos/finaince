@@ -141,6 +141,10 @@ def test_desk_approve_flow(monkeypatch):
         name=f"lucky_{uid}",
         expression=FactorExpression(dialect="repro_polars", text="Rank(close)"),
         universe="local_panel",
+        engine="pit_core",
+        window_start="2023-01-01",
+        window_end="2023-01-26",
+        citable=True,
         metrics=FactorMetrics(ic=0.05, extra={"ic_ir": 0.1}), # t_stat = 0.1 * sqrt(25) = 0.5 < 3.0
         daily_returns=returns,
         lineage=FactorLineage(source="manual", source_ref=f"lucky_{uid}"),
@@ -162,7 +166,11 @@ def test_desk_approve_flow(monkeypatch):
     assert "inflated_sharpe" in app["gates"]["failures"]
     
     # Override path works
-    app_override = approve(pid, override=["weak_ic", "inflated_sharpe", "thin_panel", "homogeneous"])
+    app_override = approve(
+        pid,
+        override=["weak_ic", "inflated_sharpe", "thin_panel", "homogeneous"],
+        adversary=False,
+    )
     assert app_override["ok"]
     
     # Thin data row -> gates skipped not failed
@@ -171,6 +179,10 @@ def test_desk_approve_flow(monkeypatch):
         name="thin",
         expression=FactorExpression(dialect="repro_polars", text="Rank(close)"),
         universe="local_panel",
+        engine="pit_core",
+        window_start="2023-01-01",
+        window_end="2023-01-09",
+        citable=True,
         metrics=FactorMetrics(ic=0.05),
         daily_returns={f"2023-01-{i:02d}": 0.01 for i in range(1, 10)}, # < 20 obs
         lineage=FactorLineage(source="manual", source_ref="thin"),
@@ -182,7 +194,9 @@ def test_desk_approve_flow(monkeypatch):
     promo_thin = promote(rec_thin.id, direction="to_pool")
     pid_thin = promo_thin["promotion_id"]
     
-    app_thin = approve(pid_thin, override=["thin_panel", "homogeneous"]) # override thin_panel so it doesn't fail on that
+    app_thin = approve(
+        pid_thin, override=["thin_panel", "homogeneous"], adversary=False
+    )  # override thin_panel so it doesn't fail on that
     assert app_thin["ok"]
     assert "weak_ic" not in app_thin["gates"]["failures"]
     assert "inflated_sharpe" not in app_thin["gates"]["failures"]

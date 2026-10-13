@@ -42,7 +42,7 @@ def test_adjudicate_degrades_without_credentials(monkeypatch, isolated_home) -> 
     monkeypatch.delenv("BRAIN_PASS", raising=False)
     result = adjudicate("Rank(Delta(close, 5))")
     assert result["ok"] is False
-    assert result["adjudication_level"] == "none"
+    assert result["adjudication_level"] == "internal_dual_window"
     assert result["reason"] == "no_credentials"
     assert result["degraded_to"]["tool"].startswith("finaince bench")
 

@@ -12,12 +12,93 @@ import json
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    HookMatcher,
-    create_sdk_mcp_server,
-    tool,
-)
+try:
+    from claude_agent_sdk import (
+        AgentDefinition,
+        ClaudeAgentOptions,
+        HookMatcher,
+        create_sdk_mcp_server,
+        tool,
+    )
+
+    _HAS_SDK = True
+except ImportError:
+    _HAS_SDK = False
+
+    class ClaudeAgentOptions:  # type: ignore[no-redef]
+        def __init__(
+            self,
+            *,
+            mcp_servers: dict[str, Any] | None = None,
+            allowed_tools: list[str] | None = None,
+            system_prompt: str | None = None,
+            agents: dict[str, Any] | None = None,
+            hooks: dict[str, list[Any]] | None = None,
+            **kwargs: Any,
+        ) -> None:
+            self.mcp_servers = mcp_servers or {}
+            self.allowed_tools = allowed_tools or []
+            self.system_prompt = system_prompt or ""
+            self.agents = agents or {}
+            self.hooks = hooks or {}
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    class HookMatcher:  # type: ignore[no-redef]
+        def __init__(self, *, matcher: str = "*", hooks: list[Any] | None = None) -> None:
+            self.matcher = matcher
+            self.hooks = hooks or []
+
+    class AgentDefinition:  # type: ignore[no-redef]
+        def __init__(
+            self,
+            *,
+            description: str = "",
+            prompt: str = "",
+            tools: list[str] | None = None,
+        ) -> None:
+            self.description = description
+            self.prompt = prompt
+            self.tools = tools or []
+
+    def create_sdk_mcp_server(  # type: ignore[no-redef]
+        *,
+        name: str = "",
+        version: str = "",
+        tools: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "type": "sdk",
+            "name": name,
+            "version": version,
+            "tools": tools or [],
+            "instance": object(),
+        }
+
+    def tool(*_args: Any, **_kwargs: Any) -> Any:  # type: ignore[misc]
+        def _wrap(fn: Any, name: str | None = None, description: str | None = None) -> Any:
+            fn.name = name if name is not None else getattr(fn, "__name__", "")
+            if description is not None:
+                fn.description = description
+            elif getattr(fn, "__doc__", None):
+                fn.description = fn.__doc__
+            else:
+                fn.description = ""
+            fn.handler = fn
+            return fn
+
+        if len(_args) == 1 and callable(_args[0]) and not _kwargs:
+            return _wrap(_args[0])
+
+        name = _kwargs.get("name") or (_args[0] if _args and isinstance(_args[0], str) else None)
+        description = _kwargs.get("description") or (
+            _args[1] if len(_args) > 1 and isinstance(_args[1], str) else None
+        )
+
+        def _decorator(fn: Any) -> Any:
+            return _wrap(fn, name=name, description=description)
+
+        return _decorator
 
 from finaince._paths import ensure_import_paths
 
@@ -418,8 +499,6 @@ async def post_tool_use_hook(
 
 
 def _specialist_agents() -> dict[str, Any]:
-    from claude_agent_sdk import AgentDefinition
-
     from finaince.agent_playbook import specialist_briefs
 
     allowed = allowed_mcp_tool_names()
@@ -488,11 +567,18 @@ def describe_session_options(options: ClaudeAgentOptions | None = None) -> dict[
         "has_system_prompt": bool(opts.system_prompt),
         "specialists": sorted((opts.agents or {}).keys()),
         "product": "FinAlpha",
+        "available": _HAS_SDK,
     }
 
 
 def try_live_query(prompt: str) -> dict[str, Any]:
     """Attempt ``query()``. Missing CLI/credentials is an environment failure."""
+    if not _HAS_SDK:
+        return {
+            "ok": False,
+            "error_type": "ModuleNotFoundError",
+            "error": "claude_agent_sdk is not installed",
+        }
     import asyncio
 
     from claude_agent_sdk import query

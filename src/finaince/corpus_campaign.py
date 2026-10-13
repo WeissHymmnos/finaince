@@ -92,8 +92,12 @@ def process_one(pdf_path: str | Path, *, backtest_kwargs: dict[str, Any] | None 
         raw = reproduce_report(Path(pdf_path), backtest_kwargs=backtest_kwargs)
     except Exception as exc:  # noqa: BLE001
         return {"state": "failed", "catalog_ids": [], "error": str(exc)[:300]}
-    state, catalog_ids, error = classify_outcome(raw)
-    return {"state": state, "catalog_ids": catalog_ids, "error": error}
+    applied = apply_report_outcome(raw)
+    return {
+        "state": applied["state"],
+        "catalog_ids": applied["catalog_ids"],
+        "error": applied["error"],
+    }
 
 
 def run_campaign(
@@ -148,16 +152,49 @@ def run_campaign(
     }
 
 
+def ready_pit_core_count() -> int:
+    """Ready rows whose engine is the citable pit core. Zero is a valid count."""
+    try:
+        from finaince.catalog.store import FactorCatalog
+
+        return sum(
+            1
+            for record in FactorCatalog().list(status="ready")
+            if record.engine == "pit_core" and record.citable
+        )
+    except Exception:
+        return 0
+
+
+def apply_report_outcome(result: dict[str, Any] | None) -> dict[str, Any]:
+    """no_factors never creates a catalog ready row."""
+    state, catalog_ids, error = classify_outcome(result)
+    if state == "no_factors":
+        return {
+            "state": "no_factors",
+            "catalog_ids": [],
+            "ready_created": 0,
+            "error": error,
+        }
+    return {
+        "state": state,
+        "catalog_ids": catalog_ids,
+        "ready_created": 0,
+        "error": error,
+    }
+
+
 def stats_summary(manifest: dict[str, Any] | None = None) -> dict[str, int]:
     manifest = manifest or load_manifest()
     counts = {state: 0 for state in ("pending", "done", "no_factors", "failed", "skipped_missing")}
     for record in manifest["entries"].values():
         state = str(record.get("status") or "pending")
         counts[state] = counts.get(state, 0) + 1
-    counts["total_known"] = sum(counts.values())
+    counts["total_known"] = sum(v for k, v in counts.items() if k != "ready_pit_core")
     counts["factors_cataloged"] = sum(
         len(record.get("catalog_ids") or []) for record in manifest["entries"].values()
     )
+    counts["ready_pit_core"] = ready_pit_core_count()
     return counts
 
 

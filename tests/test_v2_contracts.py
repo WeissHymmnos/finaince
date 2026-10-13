@@ -424,10 +424,6 @@ def test_rq_cache_roots_follow_finaince_home(isolated_home: Path, monkeypatch) -
 
 
 def test_to_library_writes_synthetic_report(isolated_home: Path) -> None:
-    from reproagent.persistence.db import get_engine
-    from reproagent.persistence.repository import Repository
-    from reproagent.settings import Settings
-
     from finaince.catalog.hooks import accept_pool_row
     from finaince.catalog.store import FactorCatalog
 
@@ -444,19 +440,12 @@ def test_to_library_writes_synthetic_report(isolated_home: Path) -> None:
     rec = next(r for r in FactorCatalog().list(source="discovery") if r.name == "disc_synth")
     promo = promote(rec.id, direction="to_library")
     assert promo["ok"] is True
-    result = approve(promo["promotion_id"], override=["thin_panel"])
-    assert result["ok"] is True, result
+    result = approve(promo["promotion_id"], override=["thin_panel"], adversary=False)
+    assert result["ok"] is False, result
+    assert "not_citable" in result["gates"]["failures"]
     after = FactorCatalog().get(rec.id)
     assert after is not None
-    assert "synthetic" in after.tags
-    assert "source:discovery" in after.tags
-    md = isolated_home / "reproagent" / "reports" / "synthetic" / f"{after.lineage.source_ref}.md"
-    assert md.is_file()
-    repo = Repository(get_engine(Settings(data_dir=isolated_home / "reproagent").db_path))
-    report = repo.get_report(after.lineage.report_id or f"disc_{after.lineage.source_ref}")
-    assert report is not None
-    assert report.validation_status in {"synthetic", "valid"}
-    assert report.broker == "finaince-discovery"
+    assert after.status != "ready"
 
 
 def test_audit_rows_written_on_review_and_eval(isolated_home: Path) -> None:

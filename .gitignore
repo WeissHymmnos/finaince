@@ -18,3 +18,5 @@ results/
 .coverage
 htmlcov/
 .cov_cache/
+.sisyphus/
+.agents/

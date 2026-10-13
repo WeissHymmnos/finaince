@@ -53,7 +53,7 @@ def advise_action(history: list[dict[str, Any]]) -> dict[str, Any]:
     heuristic_action = choose_next_action(history)
     if heuristic_action == "factor":
         if not history:
-            heuristic_hyp = "factor step: Rank(Delta(close, 1)); chosen because first step"
+            heuristic_hyp = "factor step: chosen because first step"
         else:
             last = history[-1]
             if last.get("action") == "model":
@@ -76,8 +76,8 @@ def advise_action(history: list[dict[str, Any]]) -> dict[str, Any]:
                 )
     else:
         heuristic_hyp = (
-            "model step: ols_linear head on lag-1/lag-2 factor returns; "
-            "chosen because previous factor succeeded with returns"
+            "curve-timing step: ols_linear head on lag-1/lag-2 of one portfolio curve; "
+            "not model research; chosen because previous factor succeeded with returns"
         )
 
     heuristic_result = {
@@ -200,20 +200,111 @@ def _equity_curve(returns: dict[str, float]) -> dict[str, float]:
 
 
 def _portfolio_return(curve: dict[str, float]) -> float | None:
-    if len(curve) < 2:
+    if not curve:
         return None
     keys = sorted(curve)
-    start = float(curve[keys[0]])
     end = float(curve[keys[-1]])
-    if start == 0:
+    return end - 1.0
+
+
+def _queue_from_sweep() -> list[str]:
+    try:
+        from finaince.sweep import latest_sweep_artifact, top_specs_from_artifact
+
+        path = latest_sweep_artifact()
+        if path is None:
+            return []
+        specs = top_specs_from_artifact(path, top=5)
+    except Exception:
+        return []
+    return [str(spec["expression"]) for spec in specs if spec.get("expression")]
+
+
+def _catalog_candidate(expression: str, step: dict[str, Any], hypothesis: str) -> str | None:
+    """Upsert one candidate. Returns the catalog id when provenance is present."""
+    from datetime import UTC, datetime
+
+    from finaince.catalog.store import FactorCatalog
+    from finaince.domain.factor import (
+        FactorExpression,
+        FactorLineage,
+        FactorMetrics,
+        FactorRecord,
+        finite_ic,
+    )
+
+    metrics = dict(step.get("metrics") or {})
+    engine = metrics.get("engine")
+    if not engine or not metrics.get("window_start") or not metrics.get("window_end"):
         return None
-    return end / start - 1.0
+    now = datetime.now(UTC)
+    source_ref = f"loop:{engine}:{expression}"
+    record = FactorRecord(
+        id=f"fac_{abs(hash(source_ref)) % 10**12}",
+        name=expression[:80],
+        hypothesis=hypothesis,
+        expression=FactorExpression(dialect="repro_polars", text=expression, validated=True),
+        universe="csi300_pit" if engine == "pit_core" else "local_panel",
+        engine=str(engine),
+        window_start=str(metrics.get("window_start")),
+        window_end=str(metrics.get("window_end")),
+        citable=bool(metrics.get("citable")),
+        turnover_model=metrics.get("turnover_model"),
+        universe_source="point_in_time" if engine == "pit_core" else None,
+        data_version="v1" if engine == "pit_core" else None,
+        metrics=FactorMetrics(
+            ic=finite_ic(metrics.get("ic", metrics.get("ic_mean"))),
+            rank_ic=finite_ic(metrics.get("rank_ic")),
+            icir=finite_ic(metrics.get("icir")),
+            rank_icir=finite_ic(metrics.get("rank_icir")),
+            sharpe_net=finite_ic(metrics.get("sharpe_net")),
+            cost_bps=finite_ic(metrics.get("cost_bps")),
+            n_days=metrics.get("n_days") if isinstance(metrics.get("n_days"), int) else None,
+            n_names=metrics.get("n_names") if isinstance(metrics.get("n_names"), int) else None,
+        ),
+        daily_returns={
+            str(k): float(v)
+            for k, v in (step.get("daily_returns") or {}).items()
+            if isinstance(v, (int, float))
+        },
+        status="candidate",
+        lineage=FactorLineage(source="discovery", source_ref=source_ref),
+        created_at=now,
+        updated_at=now,
+    )
+    stored = FactorCatalog().upsert(record)
+    return stored.id
 
 
-def run_factor_step(expression: str = "Rank(Delta(close, 1))") -> dict[str, Any]:
+def _pit_window() -> tuple[str, str] | None:
+    try:
+        from finaince.data_track import doctor_section
+
+        years = list(doctor_section().get("years_cached") or [])
+    except Exception:
+        return None
+    if not years:
+        return None
+    return f"{min(years)}-01-01", f"{max(years)}-12-31"
+
+
+def run_factor_step(expression: str) -> dict[str, Any]:
     from finaince.eval.router import EvalRequest, evaluate
 
-    result = evaluate(EvalRequest(expression=expression, dialect="repro_polars"))
+    window = _pit_window()
+    if window is not None:
+        result = evaluate(
+            EvalRequest(
+                expression=expression,
+                dialect="repro_polars",
+                data_backend="pit",
+                start=window[0],
+                end=window[1],
+                cost_bps=5.0,
+            )
+        )
+    else:
+        result = evaluate(EvalRequest(expression=expression, dialect="repro_polars"))
     returns = {}
     if isinstance(result.metrics, dict):
         raw = result.metrics.get("daily_returns") or {}
@@ -226,7 +317,20 @@ def run_factor_step(expression: str = "Rank(Delta(close, 1))") -> dict[str, Any]
         "expression": expression,
         "metrics": {
             "ic_mean": (result.metrics or {}).get("ic_mean"),
+            "ic": (result.metrics or {}).get("ic", (result.metrics or {}).get("ic_mean")),
+            "rank_ic": (result.metrics or {}).get("rank_ic"),
             "sharpe_ratio": (result.metrics or {}).get("sharpe_ratio"),
+            "sharpe_net": (result.metrics or {}).get("sharpe_net"),
+            "engine": (result.metrics or {}).get("engine"),
+            "citable": (result.metrics or {}).get("citable"),
+            "window_start": (result.metrics or {}).get("window_start"),
+            "window_end": (result.metrics or {}).get("window_end"),
+            "cost_bps": (result.metrics or {}).get("cost_bps"),
+            "turnover_model": (result.metrics or {}).get("turnover_model"),
+            "icir": (result.metrics or {}).get("icir"),
+            "rank_icir": (result.metrics or {}).get("rank_icir"),
+            "n_days": (result.metrics or {}).get("n_days"),
+            "n_names": (result.metrics or {}).get("n_names"),
         },
         "daily_returns": returns,
         "factor_set": [{"expression": expression, "ok": result.ok}],
@@ -289,32 +393,69 @@ def run_model_step(factor_step: dict[str, Any] | None = None) -> dict[str, Any]:
     return result
 
 
-def train_linear_head(returns: dict[str, float]) -> dict[str, Any]:
-    """OLS on lag-1/lag-2 factor returns. No sklearn required; skip if too thin."""
-    config: dict[str, Any] = {"kind": "ols_linear", "lags": 2, "backend": "local_panel"}
+def train_linear_head(
+    returns: dict[str, float],
+    min_train: int = 10,
+    cost_bps: float = 5.0,
+) -> dict[str, Any]:
+    """Expanding-window walk-forward OLS on lag-1/lag-2 factor returns with turnover friction."""
+    config: dict[str, Any] = {
+        "kind": "ols_linear",
+        "role": "curve_timing",
+        "lags": 2,
+        "backend": "local_panel",
+        "min_train": min_train,
+        "cost_bps": cost_bps,
+    }
     series = [(k, float(v)) for k, v in sorted(returns.items()) if _is_num(v)]
-    if len(series) < 6:
+    if len(series) < min_train + 10:
         return {"skipped": True, "reason": "too_few_rows", "model_config": config}
     try:
         import numpy as np
     except Exception:
         return {"skipped": True, "reason": "numpy_unavailable", "model_config": config}
+
     vals = np.array([v for _, v in series], dtype=float)
     y = vals[2:]
     x = np.column_stack([np.ones(len(y)), vals[1:-1], vals[:-2]])
-    try:
-        coef, *_ = np.linalg.lstsq(x, y, rcond=None)
-    except Exception as exc:  # noqa: BLE001
-        return {"skipped": True, "reason": f"ols_failed:{exc}", "model_config": config}
-    pred = x @ coef
-    pnl = pred * y
-    curve_vals = np.cumprod(1.0 + pnl)
-    keys = [k for k, _ in series[2:]]
-    curve = {str(k): float(v) for k, v in zip(keys, curve_vals, strict=False)}
+    y_keys = [k for k, _ in series[2:]]
+
+    preds: list[float] = []
+    pred_keys: list[str] = []
+    pnl_list: list[float] = []
+    prev_pos = 0.0
+    last_coef: np.ndarray | None = None
+
+    for t in range(min_train, len(y)):
+        X_train = x[:t]
+        y_train = y[:t]
+        try:
+            coef, *_ = np.linalg.lstsq(X_train, y_train, rcond=None)
+            last_coef = coef
+            raw_pred = float(x[t] @ coef)
+        except Exception:
+            raw_pred = 0.0
+
+        pos = float(np.clip(raw_pred * 20.0, -1.0, 1.0))
+        turnover = abs(pos - prev_pos)
+        cost = (cost_bps / 10000.0) * turnover
+        pnl = pos * float(y[t]) - cost
+
+        preds.append(raw_pred)
+        pred_keys.append(y_keys[t])
+        pnl_list.append(pnl)
+        prev_pos = pos
+
+    equity = 1.0
+    curve: dict[str, float] = {}
+    for k, p in zip(pred_keys, pnl_list, strict=False):
+        equity = max(1e-12, equity * (1.0 + p))
+        curve[str(k)] = float(equity)
+
     config = {
         **config,
-        "coef": [float(c) for c in coef],
-        "n_obs": int(len(y)),
+        "coef": [float(c) for c in last_coef] if last_coef is not None else [0.0, 0.0, 0.0],
+        "n_obs": int(len(preds)),
     }
     port = _portfolio_return(curve)
     return {
@@ -329,30 +470,42 @@ def _failed_factor_step(expr: str, error: str) -> dict[str, Any]:
     return {"action": "factor", "ok": False, "error": error, "metrics": {}, "daily_returns": {}}
 
 
-def _evaluate_batch(expressions: list[str], workers: int) -> dict[str, dict[str, Any]]:
+def _evaluate_batch(
+    expressions: list[str],
+    workers: int,
+    timeout_per_task: float = 60.0,
+) -> dict[str, dict[str, Any]]:
     """Evaluate a queue out-of-process; per-expression failures stay isolated."""
     results: dict[str, dict[str, Any]] = {}
-    max_workers = max(1, min(int(workers), len(expressions)))
+    if not expressions:
+        return results
+
+    unique_expressions = list(dict.fromkeys(expressions))
+    max_workers = max(1, min(int(workers), len(unique_expressions)))
     try:
         from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures import TimeoutError as FutureTimeoutError
         from multiprocessing import get_context
 
         # Spawn, not fork: the parent may hold sqlite locks and engine threads
         # that a forked child would inherit mid-flight.
         with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context("spawn")) as pool:
-            futures = {expr: pool.submit(run_factor_step, expr) for expr in expressions}
-            for expr, future in futures.items():
+            # Future-to-expression mapping eliminates dict key collisions
+            future_to_expr = {pool.submit(run_factor_step, expr): expr for expr in unique_expressions}
+            for future, expr in future_to_expr.items():
                 try:
-                    results[expr] = future.result()
+                    results[expr] = future.result(timeout=timeout_per_task)
+                except (FutureTimeoutError, TimeoutError):
+                    results[expr] = _failed_factor_step(expr, "worker_timeout")
                 except Exception as exc:  # noqa: BLE001
                     results[expr] = _failed_factor_step(expr, f"worker_failed:{exc}")
     except Exception:  # noqa: BLE001  pool unavailable: sequential fallback
-        for expr in expressions:
+        for expr in unique_expressions:
             try:
                 results[expr] = run_factor_step(expr)
             except Exception as exc:  # noqa: BLE001
                 results[expr] = _failed_factor_step(expr, f"worker_failed:{exc}")
-    return results
+    return {expr: results[expr] for expr in expressions}
 
 
 def run_loop(
@@ -373,7 +526,21 @@ def run_loop(
     degraded: str | None = None
     expressions_evaluated: list[dict[str, Any]] = []
     
-    queue = list(expressions) if expressions is not None else ["Rank(Delta(close, 1))"]
+    if expressions is None:
+        queue = _queue_from_sweep()
+    else:
+        queue = [expr for expr in expressions if str(expr).strip()]
+    if not queue:
+        return {
+            "ok": False,
+            "actions": [],
+            "factor_set": [],
+            "model_config": None,
+            "equity_curve": {},
+            "degraded": "expression_queue_empty",
+            "skip_reason": "expression_queue_empty",
+            "expressions_evaluated": [],
+        }
 
     workers_n = max(1, int(workers))
     precomputed: dict[str, dict[str, Any]] = {}
@@ -406,10 +573,12 @@ def run_loop(
             factor_metrics["expression"] = expr
             hypothesis = f"{hypothesis} (expression: {expr})"
             
+            catalog_id = _catalog_candidate(expr, step, hypothesis)
             expressions_evaluated.append({
                 "expression": expr,
                 "ok": step.get("ok"),
                 "ic_mean": factor_metrics.get("ic_mean"),
+                "catalog_id": catalog_id,
             })
 
             extra = {"action": "factor", "via": via}

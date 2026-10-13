@@ -1,5 +1,7 @@
 # FinAlpha 与前沿量化 Agent 竞品全景对比（2026-08）
 
+> **历史文档（2026-10-12）。** §3 的「已收口」列已过期：它写成文时还没有 AST 门禁，现在 `homogeneous` / `overcomplex` 已在门禁主路径上，而「单进程串行」也不再准确。当前哪台核产出可引用数字，以 [architecture.md](architecture.md) 和 `finaince doctor` 的 `evaluation_cores` 为准。本文的竞品机制笔记仍然有用；不要用 §3 的判定表验收仓库。
+
 | 字段 | 值 |
 |------|-----|
 | 日期 | 2026-08-21 |

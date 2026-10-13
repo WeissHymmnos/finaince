@@ -114,7 +114,7 @@ def submit_expression(
     if not has_brain_credentials():
         return {
             "ok": False,
-            "adjudication_level": "none",
+            "adjudication_level": "internal_dual_window",
             "reason": "no_credentials",
             "hint": "set BRAIN_USER/BRAIN_PASS; degraded path is the internal dual-window bench",
         }
@@ -177,12 +177,19 @@ def write_back(catalog_id: str, result: dict[str, Any]) -> dict[str, Any] | None
         record = catalog.get(catalog_id)
         if record is None:
             return None
+        if record.engine != "pit_core" or not record.citable:
+            return {"ok": False, "error": "not_citable", "ic": record.metrics.ic}
+        ic_before = record.metrics.ic
         tags = list(record.tags or [])
         if result.get("alpha_id"):
             tags.append(f"brain:{result['alpha_id']}")
         if result.get("grade"):
             tags.append(f"brain_grade:{result['grade']}")
         record.tags = tags
+        record.lineage.brain_alpha_id = result.get("alpha_id")
+        record.lineage.brain_grade = result.get("grade")
+        record.lineage.adjudication_level = result.get("adjudication_level")
+        record.metrics.ic = ic_before
         catalog.upsert(record)
         append_event(
             "brain_adjudication",
@@ -194,7 +201,7 @@ def write_back(catalog_id: str, result: dict[str, Any]) -> dict[str, Any] | None
             },
             summary=f"brain ruling grade={result.get('grade')} alpha={result.get('alpha_id')}",
         )
-        return {"ok": True, "tags": tags}
+        return {"ok": True, "tags": tags, "ic": record.metrics.ic}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
 
@@ -206,6 +213,20 @@ def adjudicate(
     settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Full adjudication step with declared ruling level on every path."""
+    if catalog_id:
+        try:
+            from finaince.catalog.store import FactorCatalog
+
+            record = FactorCatalog().get(catalog_id)
+        except Exception:
+            record = None
+        if record is None or record.engine != "pit_core" or not record.citable:
+            return {
+                "ok": False,
+                "adjudication_level": "none",
+                "reason": "not_citable",
+                "ic": None if record is None else record.metrics.ic,
+            }
     result = submit_expression(expression, settings=settings)
     if result.get("ok") and catalog_id:
         write_back(catalog_id, result)

@@ -122,7 +122,7 @@ finaince review
 ```bash
 finaince review --approve '<promotion_id>' --override thin_panel
 ```
-批准指定的因子晋升请求。对于本示例中仅包含两只股票的测试数据集，必须使用 `--override thin_panel` 参数来覆盖系统的股票数量检查。
+`approve` 默认跑对抗重评，只有 `--no-adversary` 能跳过。`--override thin_panel` 只跳过股票数量这一个门禁。两只股票的引擎回测行 `citable` 为 false，仍会因 `not_citable` 进不了池。
 
 ### 步骤 8：启动服务
 ```bash
@@ -132,7 +132,7 @@ finaince serve --host 127.0.0.1 --port 8000
 
 ### 重要说明
 
-> **HTTP API 限制**：通过 `POST /api/v1/review/{id}/approve` 接口提交批准请求时，如果请求体中包含 `{"override":[...]}` 参数，系统会固定返回 403 状态码。这是出于安全考虑的设计，防止通过 API 绕过系统的安全检查。对于示例中的测试数据集，请使用上述 CLI 命令中的 `--override thin_panel` 参数来完成批准操作。
+> **HTTP API 限制**：`POST /api/v1/review/{id}/approve` 默认跑对抗重评，不能关闭。请求体里的 `{"override":[...]}` 固定返回 403。`adversary` 若不是 `true`，返回 400。CLI 的 `--override thin_panel` 只跳过这一个具名门禁，不把不可引用的行放进池。
 
 > **晋升失败的常见原因**：
 > - 股票数量过少（少于 20 只）：系统会因 `thin_panel` 检测而暂停晋升流程
@@ -167,6 +167,8 @@ finaince serve --host 127.0.0.1 --port 8000
 
 要在完整的股票池上进行评测，而不是使用系统自带的测试数据集，请将环境变量 `FINAINCE_PANEL_PATH` 指向一个符合 `prices.parquet` 格式（包含 `trade_date`、`ts_code`、`close` 等列）的 Parquet 文件。或者，配置 RiceQuant 凭证（`RQ_USER` 和 `RQ_PASS`）以解锁 `data_backend=ricequant`。所有晋升的因子指标都应明确标注交易成本（如 `cost_bps`）、股票池范围和回测窗口，以确保数据的可比性。
 
+`finaince bench` 的点时表（默认 IS 2019–2023 / OOS 2024，双边 5 bps）是 `pit_core`，不进 catalog。`finaince eval` 和 `finaince bench` 只打印指标。catalog 候选由 `loop._catalog_candidate` 和 `isolate.upsert_isolated` 写入。`finaince doctor` 在 `evaluation_cores.catalog_writers` 列出这两个名字，三台核的 `writes_catalog` 都是 false。说明见 [docs/architecture.md](docs/architecture.md)。行情缓存不在仓库里；`docs/CHANGELOG.md` 里的某次本机跑数不是公开引用表。
+
 ---
 
 ## 功能特性
@@ -200,16 +202,16 @@ FinAlpha 提供了一套完整的因子管理和研报复现解决方案，具�
 - **多重检验门禁**：`weak_ic`（Harvey-Liu t ≥ 3）与 `inflated_sharpe`（Deflated Sharpe），搜索幸存者偏差不再混进晋升
 - **生成端正则化**：AST 结构查重门禁 `homogeneous` 与复杂度上限 `overcomplex`；候选入池前近重复直接淘汰；catalog 带 `expr_hash` O(1) 查重
 - **吞吐优化**：进程级本地 panel 缓存、在途作业查重守卫、`FINAINCE_MAX_JOBS` 并发上限、显著负 IC 因子的符号镜像
-- **真宇宙数字轨**：`finaince bench` 输出 CSI300 point-in-time 双窗基准表（IS 2019–2023 / OOS 2024，双边 5bps），缓存带 sha256 清单，数字可第三方复现
-- **筛选地图与折叠验证**：`finaince sweep` 模板网格筛选 + `finaince wf-candidates` 候选逐年折稳健性，同一 PIT 核，探索性数字明确标注非可引用结论
-- **沙箱分层**：冻结内建之上可选 bubblewrap 层（`--new-session --unshare-all`），结果诚实标注实际层，失败自动回落
-- **治理内代码因子进化**：LLM 写完整 `compute(panel)` 进沙箱，失败按错误前缀 + AST 差异改写下一稿，产物全过门禁
-- **动态组合**：跨 ready 因子滚动逆波动率每日权重（严格无未来信息），换手计成本；loop 奖励升级为净 Sharpe
+- **真宇宙数字轨**：`finaince bench` 在点时 CSI300 缓存上输出双窗表（默认 IS 2019–2023 / OOS 2024，双边 5 bps），缓存带 sha256。表不进 catalog。缓存不在仓库内，第三方要自己备好数据再重跑
+- **筛选地图与折叠验证**：`finaince sweep` 模板网格筛选 + `finaince wf-candidates` 候选逐年折。探索性结果不构成晋升
+- **沙箱分层**：冻结内建之上可选 bubblewrap。命令不含 `--share-net`；结果里的 `via` 标明实际用了哪一层
+- **治理内代码因子进化**：LLM 写 `compute(panel)` 进沙箱，失败按错误前缀检索后再改一稿，然后走同一套门禁
+- **动态组合**：对 ready 因子的日收益序列做滚动逆波动加权（权重用到 t−1），换手按权重向量计成本。这不是股票持仓组合
 - **BRAIN 外部裁决**：治理流产出可提交平台评级并回写 catalog；无凭据时声明降级为内部双窗基准
 - **语料战役**：券商研报批量治理内复现，断点续跑，`no_factors` 是诚实终态
 - **过程记忆**：以「门禁+对抗存活」做信用分配，AST 差异编辑动机加权记忆注入 advisor；经验链降为展示层
-- **研究循环**：因子/模型交替，表达式队列批量无人值守；模型头可切换 OLS/LightGBM（walk-forward，库缺失诚实跳过）；可选 LLM advisor，失败回落启发式
-- **对抗评审**：批准前可在全新子进程里重跑同一条评测并比对指标容差，数值对不上就否决
+- **研究循环**：没有筛选产物、也没有 `--expression` 时返回 `expression_queue_empty`，不会去评测一条默认公式。`FINAINCE_MODEL_HEAD` 是曲线择时：在一条组合收益曲线的滞后项上拟合 OLS 或 LightGBM，不是模型研发。库缺失时跳过
+- **对抗评审**：`approve` 默认在全新子进程里重跑评测。只有 CLI 的 `--no-adversary` 能跳过。HTTP 不能跳过
 - **教练层**：低相关样例采样 + 失败教训蒸馏（`research_context`），回灌到提案与 advisor
 - **事件链**：每步带 hypothesis 的 trace 链，按错误前缀检索同类失败
 
@@ -230,7 +232,7 @@ FinAlpha 提供了一套完整的因子管理和研报复现解决方案，具�
 
 > **关于 Qlib 的说明**：Qlib 框架公开发布的数据基于长窗口的 CSI300 指数成分股。而 FinAlpha 发布的测试数据则基于固定的短窗口。两者的数据周期和股票范围都有所不同，请在使用时注意区分。
 >
-> 全景竞品对比见 [docs/competitor-analysis.md](docs/competitor-analysis.md)，路线图见 [docs/improvement-plan-v3.md](docs/improvement-plan-v3.md)，逐步实现记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+> 哪台核产出数字见 [docs/architecture.md](docs/architecture.md)。竞品笔记 [docs/competitor-analysis.md](docs/competitor-analysis.md) 与 [docs/improvement-plan-v3.md](docs/improvement-plan-v3.md) 是历史文档，里面的「已收口」表不要当作验收线。逐步实现记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ---
 

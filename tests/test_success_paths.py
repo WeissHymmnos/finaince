@@ -79,11 +79,10 @@ def test_cli_approve_override_writes_pool_code(isolated_home: Path) -> None:
             ["review", "--approve", promo["promotion_id"], "--override", "thin_panel,homogeneous"],
         ).stdout
     )
-    assert approved["ok"] is True, approved
+    assert approved["ok"] is False, approved
+    assert "not_citable" in ((approved.get("gates") or {}).get("failures") or [])
     rows = load_alpha_pool_rows(get_settings().aiminer_db)
-    assert len(rows) > len(before)
-    written = next(row for row in rows if row.get("code"))
-    assert written["code"]
+    assert len(rows) == len(before)
     import finaince.serve as serve_mod
 
     serve_mod.app = None

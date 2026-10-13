@@ -20,7 +20,6 @@ from finaince.data_track import (
     CACHE_VERSION,
     INDEX_CODE,
     _daily_ic,
-    _factor_artifacts,
     _forward_returns,
     _layered_long_short,
     _metrics_from_artifacts,
@@ -28,7 +27,8 @@ from finaince.data_track import (
     _year_dir,
     components_map,
     read_years,
-    universe_for_date,
+    suspensions_map,
+    tradable_members,
 )
 
 FIELDS = ("close", "high", "low", "volume", "amount")
@@ -172,9 +172,10 @@ def _eval_chunk(payload: tuple[list[dict[str, Any]], dict[str, Any]]) -> list[di
         verify_hash=False,
     )
     comp = components_map()
+    suspended = suspensions_map()
     universe_by_day_all: dict[Any, set[str]] = {}
     for day in set(frame["trade_date"].to_list()):
-        members = universe_for_date(day, comp)
+        members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
     forwards = _forward_returns(frame)
@@ -193,12 +194,17 @@ def _eval_chunk(payload: tuple[list[dict[str, Any]], dict[str, Any]]) -> list[di
         }
         try:
             scores = score_candidate(frame, spec)
+            from finaince.eval.pit_core import metrics_for_window
+
             for label, (w_start, w_end) in windows.items():
-                scoped = _scoped_universe(
-                    universe_by_day_all, w_start, w_end, embargo=cfg["embargo"]
-                )
-                row[label] = _metrics_from_artifacts(
-                    _factor_artifacts(scores, forwards, scoped), cfg["cost_bps"]
+                row[label] = metrics_for_window(
+                    scores,
+                    forwards,
+                    universe_by_day_all,
+                    w_start,
+                    w_end,
+                    cfg["cost_bps"],
+                    embargo=cfg["embargo"],
                 )
             row["ok"] = True
         except Exception as exc:  # noqa: BLE001
@@ -490,9 +496,10 @@ def _load_eval_context(cfg: dict[str, Any]) -> tuple[Any, dict[Any, set[str]], A
         verify_hash=False,
     )
     comp = components_map()
+    suspended = suspensions_map()
     universe_by_day_all: dict[Any, set[str]] = {}
     for day in set(frame["trade_date"].to_list()):
-        members = universe_for_date(day, comp)
+        members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
     forwards = _forward_returns(frame)

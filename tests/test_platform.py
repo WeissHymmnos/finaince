@@ -186,17 +186,13 @@ def test_approve_reproduction_to_pool_writes_nonempty_code(isolated_home: Path) 
     submitted = promote(rec.id, direction="to_pool")
     assert submitted["ok"] is True
     assert submitted["status"] == "review"
-    result = approve(submitted["promotion_id"], override=["thin_panel", "homogeneous"])
-    assert result["ok"] is True, result
-    assert result["status"] == "ready"
+    result = approve(submitted["promotion_id"], override=["thin_panel", "homogeneous"], adversary=False)
+    assert result["ok"] is False, result
+    assert "not_citable" in result["gates"]["failures"]
 
     settings = get_settings()
     rows = load_alpha_pool_rows(settings.aiminer_db)
-    assert rows
-    written = next(row for row in rows if row.get("hypothesis") in {"repro_momentum", rec.name})
-    assert written.get("code")
-    assert written["code"] == "Rank(Delta($close, 1))"
-    assert written.get("returns")
+    assert not any(row.get("hypothesis") in {"repro_momentum", rec.name} for row in rows)
 
 
 def test_named_scorers_are_distinct() -> None:

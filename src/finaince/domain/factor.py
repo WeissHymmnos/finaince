@@ -38,11 +38,17 @@ class FactorExpression(BaseModel):
 class FactorMetrics(BaseModel):
     ic: float | None = None
     rank_ic: float | None = None
+    icir: float | None = None
+    rank_icir: float | None = None
     sharpe: float | None = None
+    sharpe_net: float | None = None
     annualized_return: float | None = None
     max_drawdown: float | None = None
     turnover: float | None = None
+    cost_bps: float | None = None
     cost_drag: float | None = None
+    n_days: int | None = None
+    n_names: int | None = None
     selection_score: float | None = None
     library_grade: str | None = None
     library_score: float | None = None
@@ -61,6 +67,9 @@ class FactorLineage(BaseModel):
     formula_fallback: bool = False
     universe_fallback: bool = False
     recovery_used: bool = False
+    brain_alpha_id: str | None = None
+    brain_grade: str | None = None
+    adjudication_level: str | None = None
 
 
 class FactorRecord(BaseModel):
@@ -72,6 +81,13 @@ class FactorRecord(BaseModel):
     style: str | None = None
     expression: FactorExpression
     universe: str = "local_panel"
+    engine: str | None = None
+    window_start: str | None = None
+    window_end: str | None = None
+    citable: bool = False
+    turnover_model: str | None = None
+    universe_source: str | None = None
+    data_version: str | None = None
     market_profile: str = "cn_stock"
     rebalance_frequency: str | None = None
     metrics: FactorMetrics = Field(default_factory=FactorMetrics)

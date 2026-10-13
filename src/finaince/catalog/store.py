@@ -52,6 +52,8 @@ class FactorCatalog:
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(_DDL)
             ensure_columns(conn, "factor_catalog", [("expr_hash", "TEXT")])
+            self._migrate_unknown_engine(conn)
+            conn.commit()
 
     def upsert(self, record: FactorRecord) -> FactorRecord:
         now = datetime.now(UTC).isoformat()
@@ -146,6 +148,26 @@ class FactorCatalog:
             ).fetchall()
         return [{"id": r[0], "source": r[1], "status": r[2], "formula": r[3]} for r in rows]
 
+    @staticmethod
+    def _migrate_unknown_engine(conn: sqlite3.Connection) -> None:
+        """Stamp pre-contract rows engine=unknown. Never flips status to ready."""
+        rows = conn.execute("SELECT id, record_json, status FROM factor_catalog").fetchall()
+        for catalog_id, raw, status in rows:
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if data.get("engine"):
+                continue
+            data["engine"] = "unknown"
+            data["citable"] = False
+            if status:
+                data["status"] = status
+            conn.execute(
+                "UPDATE factor_catalog SET record_json=? WHERE id=?",
+                (json.dumps(data, default=str), catalog_id),
+            )
+
     def get(self, catalog_id: str) -> FactorRecord | None:
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
@@ -154,7 +176,11 @@ class FactorCatalog:
             ).fetchone()
         if not row:
             return None
-        return FactorRecord.model_validate(json.loads(row[0]))
+        data = json.loads(row[0])
+        if not data.get("engine"):
+            data["engine"] = "unknown"
+            data["citable"] = False
+        return FactorRecord.model_validate(data)
 
     def list(
         self,

@@ -161,6 +161,8 @@ def _evaluate(req: EvalRequest) -> EvalResult:
     translation = attach_translation(req.expression, req.dialect)
     alt_text = translation.get("alt_text") if isinstance(translation.get("alt_text"), str) else None
     translatable = bool(translation.get("translatable"))
+    if req.dialect == "repro_polars" and (req.data_backend or "").strip().lower() == "pit":
+        return _evaluate_pit(req, translatable=translatable, alt_text=alt_text)
     if req.dialect == "repro_polars":
         from reproagent.reproducer.polars_engine import validate_expression
 
@@ -246,11 +248,13 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             bt = build_backtest_bundle(req.expression, **bundle_kwargs)
         except Exception as exc:  # noqa: BLE001
             emit("eval_finished", dialect=req.dialect, data_backend=backend, ok=False)
+            text = str(exc)
+            empty = "EMPTY" in text or "does not intersect" in text
             return EvalResult(
                 ok=False,
                 dialect=req.dialect,
                 data_backend=backend or settings.data_source,
-                error=f"backtest_failed:{exc}",
+                error="empty_or_missing_ic" if empty else f"backtest_failed:{exc}",
                 translatable=translatable,
                 alt_text=alt_text,
                 warnings=warnings,
@@ -327,6 +331,11 @@ def _evaluate(req: EvalRequest) -> EvalResult:
         
         metrics_dict = {
             "validation": payload,
+            "engine": "engine_native",
+            "citable": False,
+            "window_start": start,
+            "window_end": end,
+            "turnover_model": "engine_native",
             "ic_mean": ic,
             "ic_ir": bt.get("ic_ir"),
             "sharpe_ratio": sharpe_ratio,
@@ -402,6 +411,10 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             metrics={
                 **(payload.get("metrics") or {}),
                 "via": via,
+                "engine": "qlib",
+                "citable": False,
+                "window_start": req.start,
+                "window_end": req.end,
                 "universe_claim": req.universe,
                 "alt_text": alt_text,
             },
@@ -417,4 +430,83 @@ def _evaluate(req: EvalRequest) -> EvalResult:
         error="unknown dialect",
         translatable=translatable,
         alt_text=alt_text,
+    )
+
+
+def _evaluate_pit(req: EvalRequest, *, translatable: bool, alt_text: str | None) -> EvalResult:
+    """Score on the point-in-time cache with the same function bench uses."""
+    from datetime import date
+
+    from finaince.domain.factor import finite_ic
+    from finaince.obs import emit
+
+    if req.start and req.end and req.start > req.end:
+        emit("eval_finished", dialect=req.dialect, data_backend="pit", ok=False)
+        return EvalResult(
+            ok=False,
+            dialect=req.dialect,
+            data_backend="pit",
+            error="invalid_window",
+            translatable=translatable,
+            alt_text=alt_text,
+        )
+    cost = finite_ic(req.cost_bps) if req.cost_bps is not None else 0.0
+    if cost is None or cost < 0 or cost > 10_000:
+        emit("eval_finished", dialect=req.dialect, data_backend="pit", ok=False)
+        return EvalResult(
+            ok=False,
+            dialect=req.dialect,
+            data_backend="pit",
+            error="invalid_cost_bps",
+            translatable=translatable,
+            alt_text=alt_text,
+        )
+    from finaince.data_track import (
+        components_map,
+        read_years,
+        suspensions_map,
+        tradable_members,
+    )
+    from finaince.eval.pit_core import score_frame_window
+
+    try:
+        comp = components_map()
+        if not comp:
+            raise FileNotFoundError("constituents cache empty")
+        earliest = min(comp)
+        latest_year = max(comp).year
+        start = date.fromisoformat(req.start) if req.start else date(earliest.year, 1, 1)
+        end = date.fromisoformat(req.end) if req.end else date(latest_year, 12, 31)
+        frame = read_years(max(earliest, date(start.year, 1, 1)), date(end.year, 12, 31))
+        suspended = suspensions_map()
+        universe: dict[Any, set[str]] = {}
+        for day in set(frame["trade_date"].to_list()):
+            members = tradable_members(day, comp, suspended)
+            if members:
+                universe[day] = set(members)
+        metrics = score_frame_window(
+            frame, req.expression, universe, start, end, float(cost), embargo=True
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        emit("eval_finished", dialect=req.dialect, data_backend="pit", ok=False)
+        return EvalResult(
+            ok=False,
+            dialect=req.dialect,
+            data_backend="pit",
+            error=str(exc),
+            translatable=translatable,
+            alt_text=alt_text,
+        )
+    ok = metrics.get("ic") is not None
+    metrics["universe_source"] = "point_in_time"
+    metrics["data_version"] = "v1"
+    emit("eval_finished", dialect=req.dialect, data_backend="pit", ok=ok)
+    return EvalResult(
+        ok=ok,
+        dialect=req.dialect,
+        data_backend="pit",
+        metrics=metrics,
+        translatable=translatable,
+        alt_text=alt_text,
+        error=None if ok else "insufficient_pit_sample",
     )

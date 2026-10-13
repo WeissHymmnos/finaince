@@ -1,4 +1,4 @@
-"""Live calls: configured chat LLM, RiceQuant, ~/Documents/Data, categorized PDF."""
+"""Live calls: configured chat LLM, RiceQuant, ~/Documents/finance/data/samples, categorized PDF."""
 
 from __future__ import annotations
 

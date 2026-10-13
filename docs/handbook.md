@@ -12,6 +12,8 @@
 
 FinAlpha 管卖方研报里的选股因子。你在本机打开它，把候选收进 **catalog**，在本地行情上 **eval**，过了门禁再 **promote → review → pool**。研报本身用 `reproagent` 和 `finpdfpro` 抽公式、再回测。
 
+catalog 候选由 `loop._catalog_candidate` 和 `isolate.upsert_isolated` 写入。`finaince eval` 和 `finaince bench` 只打印指标，点时表不会自动进目录。哪台核可引用、谁写 catalog，见 [architecture.md](architecture.md)，或看 `finaince doctor` 的 `evaluation_cores.catalog_writers`。
+
 包装里带了两只股票的 `local_panel`，日期从 2023-01-03 到 2023-02-10，成本 0 bps，表达式是 `Rank(Delta(close, 1))`。`finaince baseline` 报的 IC、Sharpe 只对这几条数据负责。股票太少，够用来确认安装跑通。
 
 ---
@@ -88,8 +90,8 @@ finaince baseline
     "note": "install smoke local_panel fixture; cost 0 bps"
   },
   "metrics": {
-    "ic_mean": -0.18518518518518517,
-    "sharpe_ratio": -3.7648821410668716,
+    "ic_mean": "<smoke only>",
+    "sharpe_ratio": "<smoke only>",
     "rows": 56,
     "universe_claim": "local_panel",
     "transaction_cost_bps": 0.0
@@ -105,7 +107,7 @@ finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
 finaince eval 'Rank($close)' --dialect qlib --backend local
 ```
 
-在 3.12 slim 安装上，`qlib` 走进程内的 `qlib_child`。如果你机器上的 `~/Documents/Data/prices.parquet` 只有 `trade_date` / `ts_code` 两列，评测会改用打包的 `local_panel`。
+在 3.12 slim 安装上，`qlib` 走进程内的 `qlib_child`。如果你机器上的 `~/Documents/finance/data/samples/prices.parquet` 只有 `trade_date` / `ts_code` 两列，评测会改用打包的 `local_panel`。
 
 ### 3.4 用隔离的 `compute(panel)` 写入 catalog
 
@@ -133,7 +135,7 @@ finaince review
 finaince review --approve '<promotion_id>' --override thin_panel
 ```
 
-打包的 `local_panel` 只有两只股票，晋升时会打上 `thin_panel`。HTTP `POST /api/v1/review/{id}/approve` 如果带了 `override`，固定返回 403。这两只股票要进 pool，请用上面最后那一行 CLI。
+打包的 `local_panel` 只有两只股票，晋升时会打上 `thin_panel`。`review --approve` 默认跑对抗重评，只有 `--no-adversary` 能跳过。`--override thin_panel` 只跳过这一个具名门禁。这条安装示例来自引擎回测，`citable` 为 false，仍会因 `not_citable` 进不了 pool。HTTP `POST /api/v1/review/{id}/approve` 带 `override` 固定 403，也不能关掉对抗重评。
 
 ### 3.7 打开工作台
 
@@ -165,7 +167,7 @@ finaince serve --host 127.0.0.1 --port 8000
 
 ### 4.2 Review
 
-这里列的是待审晋升。图里这一条方向是 `to_pool`、状态是 `pending`，门禁失败原因是 `thin_panel`。页面上的 **Approve** 不会附带 override，点下去仍会失败。要在股票不足 20 只时放行，请回到终端执行 `finaince review --approve … --override thin_panel`。
+这里列的是待审晋升。图里这一条方向是 `to_pool`、状态是 `pending`，门禁失败原因是 `thin_panel`。页面上的 **Approve** 不带 override，并且要等对抗重评通过才可点。股票不足 20 只时，终端可以用 `finaince review --approve … --override thin_panel` 跳过这一个门禁；对抗重评仍然会跑，除非加上 `--no-adversary`。不可引用的 `engine_native` 行还会被 `not_citable` 拦住。
 
 ![Review 队列因 thin_panel 拒批](handbook/images/03-review.png)
 
@@ -209,25 +211,25 @@ finaince --help
 |---|---|
 | `doctor` | 检查家目录、import、panel、qlib child、LLM（`--audit-check` 重放审计哈希链；`--watch/--iterations/--interval` 常驻） |
 | `baseline` | 用自带的两只股票跑一遍固定窗口（`run_locked_baseline(cost_bps=…)` 支持含成本口径） |
-| `eval EXPR --dialect repro_polars\|qlib --backend local\|ricequant\|auto` | 按方言和数据后端评测；`--start/--end` 锁窗；`--snapshot` 对金标快照（漂移只告警）；`--engine-parity` 可选 3.10 qlib 子进程对拍。成本参数 `cost_bps` 目前是 `EvalRequest` 编程接口，CLI/HTTP 未暴露 |
+| `eval EXPR --dialect repro_polars\|qlib --backend local\|pit\|ricequant\|auto --cost-bps N` | `--backend pit` 与 `bench` 共用点时核，数字可引用。`--backend local` 是 `engine_native`，`citable` 为 false。`--start/--end` 锁窗；`--cost-bps` 传入成本 |
 | `validate EXPR` | 用 polars 引擎校验表达式 |
 | `impl PATH.py --name NAME --universe local_panel` | 隔离执行 `compute(panel)`，写入 catalog |
 | `reproduce PDF --sync [--start --end --source]` | 摄入研报并回测，可锁窗、选数据源 |
 | `catalog [--source SRC] [--rebuild] [--retag-synthetic]` | 列出 / 重建 catalog（rustminer 只读源） |
 | `library [-q QUERY] [--style STYLE]` | 先搜 catalog（可按 style 过滤），再搜引擎库 |
 | `promote ID --to to_pool --yes` | 提交审核 |
-| `review` / `--approve ID --override thin_panel,weak_ic` / `--reject ID` | 查看队列、放行（override 仅限列名门禁）、退回 candidate |
+| `review` / `--approve ID [--override thin_panel,weak_ic] [--no-adversary]` / `--reject ID` | 查看队列或退回。`approve` 默认跑对抗重评；只有 `--no-adversary` 跳过。`--override` 只跳过列出的具名门禁，跳不过 `unprovenanced` 和 `not_citable` |
 | `discover --demo` | 不调 LLM，做一轮 IC / 相关 cull |
 | `discover --swarm --sync/--async` | 启动 aiminer manager swarm（需要 LLM）；裸 `discover` 退出码 2 |
 | `serve --host 127.0.0.1 --port 8000` | 打开同源工作台 |
 | `jobs [--cancel ID]` | 作业列表 / 取消 |
 | `trace [--limit N]` | 研究事件链（每条带 hypothesis） |
-| `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 因子/模型交替环，支持表达式队列批量；模型步自动尝试跨 ready 因子动态组合（WS-I）；`--workers N`（1–8）对队列做进程级并行预评估 |
-| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync]` | WS-D：CSI300 point-in-time 双窗基准表；`--sync` 需米筐凭据抓缓存（现支持 2014 起）。`--cost-sweep 0,5,10,20` 出成本敏感度曲线；`--no-embargo` 关闭窗口末日剔除（默认开启防前瞻跨界）；`--neutralize-vs <种子名>` 截面残差化。缓存已含 2014–2024 十一年与 21 个再平衡快照（2016-06-10 为数据源缺口，provenance 显式列出）。扩展窗首批读数：reversal_5 IS rankIC +0.0385、OOS 净 Sharpe +0.54 对 IS −0.86 反号照实报 |
-| `walkforward [--start --end --cost-bps --neutralize-vs]` | 逐年折叠稳健性：IC mean±std + 正折比例。十折首批读数：reversal_5 rankIC +0.040±0.028、90% 折为正，中性化后仍 +0.035——种子中唯一跨十年稳定信号 |
-| `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 筛选地图：6 模板×字段×窗口网格直编 polars，复用 bench PIT 核（数字直接可比）；spawn 并行；JSON+MD 工件落盘。首批发现 compression 族 OOS IC≈0.036 但 IS≈0——标注为待查信号非主张 |
-| `wf-candidates [--top N --from-sweep PATH --rank-by --cost-bps --workers]` | 筛选候选逐年折叠验证：读最新（或指定）sweep 工件取 top-N，逐年折算 rankIC mean±std + 正折比例 + 净 Sharpe。首批裁决：compression 族 rankIC 十一折 9 正、t≈3.4——排序信号跨十年真实存在，非 2024 孤例；但日换手参与率 26–40% 使净 Sharpe 均值 −0.45，5 bps 下不可独立交易，定位为低换手组合内的调节特征 |
-| `wf-candidates [--per-family K --combine-top N --rebalance-every M]` | 进阶用法：`--per-family` 每族限量选样（预算跨族分布）；`--combine-top` 合成截面名次等权组合行走同一折叠核；`--rebalance-every` 腿每 M 日刷新。跨族裁决：rev_volume_10 为第二个十年持久信号（11 折全正）；combined_top_2（compression+rev）rankIC +0.031、11 折全正、折级 t≈5.9——全平台最强真实宇宙排序信号；5 bps 下净 Sharpe 仍负，可交易性待低换手构造 |
+| `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 因子步与曲线择时交替。没有筛选产物、也没有 `--expression` 时返回 `expression_queue_empty`。曲线择时拟合一条组合收益曲线的滞后项，不是模型研发。`--workers N`（1–8）对队列做进程级并行预评估 |
+| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync] [--expression EXPR] [--neutralize-industry]` | 点时缓存上的双窗基准表，数字带 provenance。`--sync` 需米筐凭据。`--cost-sweep` 出成本敏感度；`--no-embargo` 关闭窗口末日剔除；`--neutralize-industry` 在没有 `industry` 列时跳过并声明，不把原始 IC 标成已中性化。缓存不在仓库里，本手册不引用某次本机跑数 |
+| `walkforward [--start --end --cost-bps --neutralize-vs]` | 逐年折叠稳健性：IC mean±std 与正折比例。输出带 provenance；本手册不引用某次本机读数 |
+| `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 筛选地图：模板×字段×窗口网格，复用 bench 的点时核；JSON 与 Markdown 落盘。筛选结果是探索，不是可引用结论 |
+| `wf-candidates [--top N --from-sweep PATH --rank-by --cost-bps --workers]` | 筛选候选逐年折叠：读最新（或指定）sweep 工件取 top-N，报告 rankIC、正折比例和净 Sharpe。探索性结果不是可引用结论 |
+| `wf-candidates [--per-family K --combine-top N --rebalance-every M]` | `--per-family` 每族限量；`--combine-top` 合成截面名次等权组合；`--rebalance-every` 每 M 日刷新持仓腿。数字留在命令输出的 provenance 里 |
 | `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
 | `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
 | `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |
@@ -241,6 +243,8 @@ finaince --help
 
 | 门禁 | 何时触发 |
 |---|---|
+| `unprovenanced` | 缺 `engine`，或缺 `window_start` / `window_end`。不能 override |
+| `not_citable` | `citable` 为 false（含 `engine_native` 与 `engine=unknown`）。不能 override，也不能单独作为晋升依据 |
 | `simulated` | 因子被判定为模拟指标 |
 | `formula_proxy` | 复现用了公式代理 |
 | `thin_panel` | 载入的 panel 股票数少于 20，和 universe 字符串无关 |
@@ -263,15 +267,15 @@ finaince --help
 
 ## 6.1 研究循环与对抗评审
 
-- `finaince loop` 让因子步和模型步交替：因子步按表达式队列逐条评测（`--expression` 可重复），模型步用可切换预测头（环境变量 `FINAINCE_MODEL_HEAD=ols|gbm`，GBM 走 expanding-window walk-forward，库缺失诚实跳过）。`--sync/--async` 决定是否走 JobRunner 子进程。
+- `finaince loop` 让因子步和曲线择时交替。因子步按表达式队列逐条评测（`--expression` 可重复）；队列和筛选产物都空时直接 `expression_queue_empty`。曲线择时用 `FINAINCE_MODEL_HEAD=ols|gbm` 拟合一条组合收益曲线的滞后项（GBM 走 expanding-window，库缺失则跳过）。这不是截面模型研发。`--sync/--async` 决定是否走 JobRunner 子进程。
 - `FINAINCE_LOOP_ADVISOR=1` 时动作选择先问聊天 LLM（读最近 trace 历史 + 低相关样例 + 失败教训）；任何失败都回落启发式并记录 `advisor_error`。
 - SDK 工具 `research_context` 返回 CSS 式低相关样例与失败教训，playbook 要求提出新因子前先调它。
-- 晋升可选对抗评审：`review --approve ID` 加 adversary 开关或 `POST /api/v1/review/{id}/adversary`。它在**子进程全新上下文里重跑同一条评测**，比对 IC/Sharpe 容差、检查 proxy 与收益存在性；拒绝则 veto，行留在 review。默认关。
+- 晋升默认做对抗评审：`review --approve ID` 会在子进程里重跑同一条评测，比对 IC/Sharpe 容差。只有 `--no-adversary` 能跳过，HTTP 不能跳过。拒绝则 veto，行留在 review。
 
 ## 6.2 超越型工作流（v3 计划落地件）
 
 - **WS-H 代码因子进化**（`code_evolution.py`）：LLM 写完整 `compute(panel)` → bwrap/冻结沙箱子进程执行 → shipped eval + 全门禁；失败按 error 前缀检索相似教训 + AST-diff 编辑动机改写下一稿。无 LLM 时停在 `llm_unavailable`，绝不假装迭代。
-- **WS-I 动态组合**（`combination.py`）：跨 catalog ready 因子按滚动逆波动率做每日权重组合（只用 t-1 前信息），换手付双边成本；loop 模型步自动尝试，bandit 奖励升级为净 Sharpe。
+- **动态组合**（`combination.py`）：只接受 `engine=pit_core` 且窗口一致的 ready 因子，按滚动逆波动率加权日收益（只用 t-1 前信息）。窗口不一致时结果是 `incompatible_windows`。这是收益序列加权，不是股票持仓优化。
 - **WS-L 过程记忆**（`process_memory.py`）：信用分配用「门禁+对抗存活」而非原始残差；AST-diff 编辑动机按错误类加权记忆注入 advisor prompt；经验链作为展示层（链尾扩展须 RankIC 超全链）。
 - **WS-F 工作台**：wheel 内 stub SPA 升级为三栏（Catalog / Review 队列含 gates 报告与对抗按钮 / Trace 时间线），纯静态零构建链。
 
@@ -289,8 +293,9 @@ finaince --help
 | `GET /api/v1/bench` | WS-D 双窗基准表（JSON，含 provenance 与 Markdown），需要 desk token |
 | `POST` promote / eval / approve / reject / adversary / reproduce / impl / impl/needs / agent / loop | 需要 desk token |
 | `POST /api/v1/jobs/{id}/cancel` | 需要 desk token |
+| `POST /api/v1/review/{id}/approve` | 默认跑对抗重评。没有跳过开关。拒绝时返回 `adversary_rejected`，行留在 review |
 | `POST /api/v1/review/{id}/approve` 且 body 带 `{"override":[…]}` | **403** |
-| `POST /api/v1/review/{id}/approve` 且 body 带 `{"adversary":true}` | 允许；对抗评审拒绝时返回 `adversary_rejected`，行留在 review |
+| `POST /api/v1/review/{id}/approve` 且 body 把 `adversary` 设成 true 以外的值 | **400**。`true` 只是重复默认行为，不能用来关闭 |
 | `POST /api/v1/review/{id}/adversary` | 只出 fresh-context 重评报告，不做决定 |
 | `POST /api/v1/loop` body 可带 `{"expressions":[…]}`、`{"sync":false}` 与 `{"workers":1..8}` | 批量表达式队列 + 异步 job + 批内并行（worker 级失败按单表达式诚实落败） |
 | `POST /api/v1/reproduce` 且 PDF 不在 `FINAINCE_PDF_ROOT` 下 | **403** |
@@ -322,7 +327,7 @@ Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINC
 | `FINAINCE_CATALOG=0` | 关掉引擎→catalog 双写 hook |
 | `FINAINCE_CATALOG_MEMORY=1` | catalog 详情默认 embed memory 摘要 |
 | `FINAINCE_LOOP_ADVISOR=1` | loop 动作选择先问聊天 LLM，失败回落启发式 |
-| `FINAINCE_MODEL_HEAD=ols\|gbm` | loop 模型头选择；gbm 需装 `.[gbm]` |
+| `FINAINCE_MODEL_HEAD=ols\|gbm` | 曲线择时用的滞后拟合；gbm 需装 `.[gbm]`。不是模型研发 |
 | `FINAINCE_PANEL_CACHE=off` | 关掉 WS-C 进程级 panel 缓存（默认开，仅 local 后端） |
 | `FINAINCE_MAX_JOBS=N` | 异步子进程并发上限（默认 2，超限返回 `max_jobs_reached`） |
 | `FINAINCE_SANDBOX=bwrap\|auto\|off` | WS-E 沙箱层：auto 检测到 bwrap 即用；失败自动回落冻结内建并标注 `sandbox_fallback` |

@@ -44,11 +44,23 @@ def max_drawdown(values: list[float] | tuple[float, ...]) -> float:
     equity = 1.0
     peak = 1.0
     drawdown = 0.0
-    for value in values:
-        equity *= 1.0 + value
-        peak = max(peak, equity)
-        drawdown = min(drawdown, equity / peak - 1.0)
-    return drawdown
+    for val in values:
+        if val is None:
+            continue
+        try:
+            v = float(val)
+        except (ValueError, TypeError):
+            continue
+        if not math.isfinite(v):
+            continue
+
+        equity = max(1e-12, equity * (1.0 + v))
+        if equity > peak:
+            peak = equity
+        dd = equity / peak - 1.0
+        if dd < drawdown:
+            drawdown = dd
+    return max(-1.0, min(0.0, drawdown))
 
 
 def ic_t_stat(ic_ir: float | None, n_days: int | None) -> float | None:

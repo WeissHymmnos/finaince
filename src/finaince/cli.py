@@ -309,6 +309,7 @@ def eval_cmd(
     start: Optional[str] = typer.Option(None, "--start"),
     end: Optional[str] = typer.Option(None, "--end"),
     snapshot: bool = typer.Option(False, "--snapshot"),
+    cost_bps: float = typer.Option(0.0, "--cost-bps"),
     engine_parity: bool = typer.Option(
         False,
         "--engine-parity",
@@ -355,6 +356,7 @@ def eval_cmd(
             start=start,
             end=end,
             universe=default_universe(data_backend),
+            cost_bps=cost_bps,
         )
     )
     typer.echo(
@@ -393,6 +395,11 @@ def review_cmd(
     approve_id: Optional[str] = typer.Option(None, "--approve"),
     reject_id: Optional[str] = typer.Option(None, "--reject"),
     override: Optional[str] = typer.Option(None, "--override", help="Comma list, e.g. thin_panel"),
+    no_adversary: bool = typer.Option(
+        False,
+        "--no-adversary",
+        help="Debug only: skip the fresh-process re-evaluation",
+    ),
 ) -> None:
     """List pending promotions or approve/reject one."""
     from finaince.catalog.store import FactorCatalog
@@ -400,7 +407,12 @@ def review_cmd(
 
     overrides = [part.strip() for part in (override or "").split(",") if part.strip()]
     if approve_id:
-        typer.echo(json.dumps(approve(approve_id, override=overrides), default=str))
+        typer.echo(
+            json.dumps(
+                approve(approve_id, override=overrides, adversary=not no_adversary),
+                default=str,
+            )
+        )
         return
     if reject_id:
         typer.echo(json.dumps(reject(reject_id), default=str))
@@ -521,6 +533,16 @@ def bench_cmd(
         "--neutralize-vs",
         help="Comma-separated seed names to residualize each factor against",
     ),
+    expression: Optional[str] = typer.Option(
+        None,
+        "--expression",
+        help="Also score this Rank(Delta) expression on the same pit core",
+    ),
+    neutralize_industry: bool = typer.Option(
+        False,
+        "--neutralize-industry",
+        help="Residualize on an industry column; skipped and declared when the column is absent",
+    ),
 ) -> None:
     """WS-D citable CSI300 double-window benchmark over the point-in-time cache."""
     from finaince.data_track import run_bench, sync_cache
@@ -550,6 +572,8 @@ def bench_cmd(
         costs=costs,
         embargo=embargo_last_day,
         neutralize_vs=controls,
+        expression=expression,
+        neutralize_industry=neutralize_industry,
     )
     typer.echo(json.dumps(result, default=str, ensure_ascii=False, indent=2))
     if not result.get("ok"):
@@ -709,7 +733,7 @@ def loop_cmd(
         help="Parallel worker processes for batch expression evaluation",
     ),
 ) -> None:
-    """Alternate a factor step and a model step toward a portfolio metric."""
+    """Alternate a factor step and a curve-timing step (lags of one portfolio curve, not model research)."""
     from finaince.jobs.runner import run_loop_job
 
     out = run_loop_job(steps=steps, sync=sync, expressions=expression, workers=workers)

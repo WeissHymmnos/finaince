@@ -71,8 +71,9 @@ def record_edit_outcome(
     error_prefix: str,
     motif: dict[str, Any],
     survived_gates: bool,
+    survived_adversary: bool = False,
 ) -> dict[str, Any]:
-    """Confidence-weighted credit: gate/adversary survival is the label."""
+    """Positive credit only when the edit survived both the gates and the adversary."""
     if not isinstance(motif, dict):
         raise TypeError("motif must be a dict")
     signature = _motif_signature(error_prefix, motif)
@@ -89,9 +90,10 @@ def record_edit_outcome(
         },
     )
     entry["attempts"] += 1
-    delta = 2.0 if survived_gates else -1.0
+    credited = bool(survived_gates) and bool(survived_adversary)
+    delta = 2.0 if credited else -1.0
     entry["weight"] = max(WEIGHT_FLOOR, min(WEIGHT_CEIL, entry["weight"] + delta))
-    if survived_gates:
+    if credited:
         entry["survived"] += 1
     entry["updated_at"] = datetime.now(UTC).isoformat()
     save_memory(payload)

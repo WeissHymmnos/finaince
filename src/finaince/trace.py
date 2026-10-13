@@ -98,6 +98,18 @@ def append_event(
     return rec
 
 
+def event_id_for_job(job_id: str) -> str | None:
+    """Latest trace event id written for this job, if finish_job recorded one."""
+    if not job_id:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM trace_events WHERE job_id=? ORDER BY created_at DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+    return str(row[0]) if row else None
+
+
 def list_chain(limit: int = 50) -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(

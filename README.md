@@ -50,7 +50,7 @@ finaince review --approve '<promotion_id>' --override thin_panel
 finaince serve --host 127.0.0.1 --port 8000
 ```
 
-HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403. To put these two stocks in the pool, use the CLI `--override thin_panel` line above. Promotion stays pending or fail-closed when the row is thin, proxied, or missing IC/returns.
+`finaince review --approve` runs adversarial re-evaluation unless you pass `--no-adversary`. HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403, and HTTP cannot skip the adversary. `--override thin_panel` skips only that named gate. The two-stock bundle row is `engine_native` and not citable, so it still fails `not_citable` and does not enter the pool.
 
 ## baseline
 
@@ -70,7 +70,9 @@ Two consecutive runs must agree on `ok` and the reported IC/Sharpe. When you quo
 
 To evaluate on a full universe instead of the shipped smoke fixture, set `FINAINCE_PANEL_PATH` to a parquet file matching the `prices.parquet` schema (`trade_date`, `ts_code`, `close`, etc.). Alternatively, providing RiceQuant credentials (`RQ_USER` and `RQ_PASS`) unlocks `data_backend=ricequant`. All promoted numbers should explicitly quote the cost (e.g., `cost_bps`), the universe, and the backtest window to ensure comparability.
 
-The true-universe track has run: `finaince bench --sync` downloaded the point-in-time CSI300 cache (2019–2024, sha256 manifests, 12 rebalance-date constituent snapshots) and produced the first citable dual-window table (IS 2019→2023 / OOS 2024, 5 bps double-sided). The seed factors are plumbing validators, not alpha: e.g. `rank_delta_20` IS IC +0.0038 / OOS IC +0.0113 with negative net Sharpe both windows; `reversal_5` flips sign OOS (+0.54 vs −0.62 net Sharpe) — reported as-is. Reproduce with `finaince bench`; provenance (windows, cost, universe, data version) ships inside the JSON output.
+`finaince bench` builds a point-in-time CSI300 table (default IS 2019–2023 / OOS 2024, 5 bps, sha256 cache). That table is `engine=pit_core` and does not enter the catalog. `finaince eval` and `finaince bench` print metrics only. Catalog candidates are written by `loop._catalog_candidate` and `isolate.upsert_isolated`. `finaince doctor` lists those names in `evaluation_cores.catalog_writers`; every core has `writes_catalog` false. See [docs/architecture.md](docs/architecture.md).
+
+The cache and the bench JSON are not in this repository. A session log in `docs/CHANGELOG.md` records one local run; those cells are not a public citation until a table lands in `docs/bench/` and a third party can rerun it from `data_version`.
 
 ## Features
 
@@ -81,20 +83,20 @@ The true-universe track has run: `finaince bench --sync` downloaded the point-in
 - Cost-aware eval (`cost_bps` net metrics) plus multiple-testing promotion gates: `weak_ic` (Harvey-Liu t ≥ 3) and `inflated_sharpe` (deflated Sharpe)
 - Generation-side regularization: AST originality (`homogeneous`) + complexity ceiling (`overcomplex`) gates, structural near-dup culling, catalog `expr_hash` dedup
 - Throughput: process-level local-panel cache, pending-job duplicate guard, `FINAINCE_MAX_JOBS` cap, sign-reflection for significant negative-IC factors
-- True-universe track (`finaince bench`): point-in-time CSI300 cache with sha256 manifests, citable IS/OOS table net of 5 bps
-- Screening map (`finaince sweep`) with candidate walk-forward validation (`finaince wf-candidates`): template-grid screening and per-year fold robustness on the same PIT core; exploratory numbers stay clearly labeled
-- Sandbox layering: optional bubblewrap above frozen builtins, honest `via` tagging and automatic fallback
-- Governed code-factor evolution: LLM-written `compute(panel)` in the sandbox, failure-retrieval rewrites, full gate coverage
-- Dynamic combination: daily inverse-volatility weights across ready factors (no look-ahead), turnover-costed; loop bandit reward upgraded to net Sharpe
-- BRAIN adjudication: governed proposals submitted for platform ruling with declared degradation when credentials are absent
+- True-universe track (`finaince bench`): point-in-time CSI300 cache with sha256 manifests. The table is citable only for that run's provenance block, and it does not enter the catalog
+- Screening map (`finaince sweep`) with candidate walk-forward validation (`finaince wf-candidates`): template-grid screening on the pit core; output stays exploratory and is not a promotion
+- Sandbox layering: optional bubblewrap above frozen builtins. The bwrap command does not pass `--share-net`; `via` reports which layer actually ran
+- Governed code-factor evolution: LLM-written `compute(panel)` in the sandbox, failure-retrieval rewrites, then the same gates
+- Dynamic combination: daily inverse-volatility weights on ready factors' return series (no look-ahead), costed on weight churn
+- BRAIN adjudication: optional HTTP client; without credentials the result says the ruling fell back to the internal bench
 - Corpus campaign: batch broker-report reproduction with resume and honest `no_factors` accounting
-- Process memory: credit assigned by gate/adversary survival over AST-diff edit motives; experience chains as display layer
-- Research loop with an expression queue, a swappable OLS/LightGBM head (`FINAINCE_MODEL_HEAD`), and an optional LLM advisor that falls back to heuristics
-- Adversarial pre-approval review: a fresh-process re-evaluation cross-checks IC/Sharpe before an approve can land
+- Process memory: edit motives stored beside gate outcomes; experience chains are a display layer
+- Research loop: with no sweep artifact and no `--expression`, the command returns `expression_queue_empty` and does not evaluate a default formula. `FINAINCE_MODEL_HEAD` selects curve timing: an OLS or LightGBM fit on lags of one portfolio curve, not model research
+- Adversarial re-evaluation runs on `approve` unless the CLI debug flag `--no-adversary` is set. HTTP approve cannot skip it
 - Coaching layer: low-correlation factor samples and distilled failure lessons fed back into proposals (`research_context`)
 - Trace chain with per-step hypothesis; similar-failure retrieval by error prefix
 
-Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity, and it says so when numbers come from the shipped `local_panel` at 0 bps. Qlib's public figures use long CSI300 windows; FinAlpha publishes this short locked window. See [docs/competitor-analysis.md](docs/competitor-analysis.md) for the full landscape and [docs/improvement-plan-v3.md](docs/improvement-plan-v3.md) for the roadmap.
+Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity, and it says so when numbers come from the shipped `local_panel` at 0 bps. Which core produced a number is [docs/architecture.md](docs/architecture.md). The 2026-08 landscape notes live in [docs/competitor-analysis.md](docs/competitor-analysis.md); treat that file's status table as historical.
 
 ## Tests
 

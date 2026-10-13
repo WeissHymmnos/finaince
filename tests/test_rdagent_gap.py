@@ -18,6 +18,7 @@ from tests.conftest import desk_headers
 
 GOOD_SRC = """
 NAME = "iso_mom"
+EXPRESSION = "Rank(Delta(close, 1))"
 def compute(panel):
     close = list(panel["close"])
     out = [0.0]
@@ -81,8 +82,8 @@ def test_isolated_impl_fail_then_success_and_gates(isolated_home: Path) -> None:
 
     rec = FactorCatalog().get(cid)
     assert rec is not None
-    assert rec.is_simulated is True
-    assert rec.daily_returns == {}
+    assert rec.is_simulated is False
+    assert rec.engine in {"engine_native", "pit_core"}
     gates = evaluate_gates(rec, direction="to_pool")
     assert "thin_panel" in gates["failures"]
     rec.universe = "local_panel"
@@ -158,7 +159,7 @@ def test_loop_alternates_factor_and_model(isolated_home: Path) -> None:
         assert (trained.get("model_config") or {}).get("kind") == "ols_linear"
         assert (trained.get("model_config") or {}).get("coef")
         assert trained.get("equity_curve")
-    out = run_loop(steps=2)
+    out = run_loop(steps=2, expressions=["Rank(Delta(close, 1))"])
     assert "factor" in out["actions"]
     assert "model" in out["actions"]
     assert out.get("factor_set") is not None
@@ -185,7 +186,11 @@ def test_http_loop_and_impl(isolated_home: Path) -> None:
 
     serve_mod.app = None
     client = TestClient(create_app())
-    looped = client.post("/api/v1/loop", json={"steps": 2}, headers=desk_headers())
+    looped = client.post(
+        "/api/v1/loop",
+        json={"steps": 2, "expressions": ["Rank(Delta(close, 1))"]},
+        headers=desk_headers(),
+    )
     assert looped.status_code == 200
     body = looped.json()
     result = body.get("result") if isinstance(body.get("result"), dict) else body

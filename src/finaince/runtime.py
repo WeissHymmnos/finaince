@@ -9,7 +9,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_LOCAL_DATA = Path.home() / "Documents" / "Data"
+DEFAULT_LOCAL_DATA = Path.home() / "Documents" / "finance" / "data" / "samples"
 OFFICIAL_DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 OFFICIAL_OPENAI_BASE = "https://api.openai.com/v1"
 
@@ -47,7 +47,7 @@ def default_pdf_root() -> Path:
     sibling = root / "KnowledgeBase" / "Quant" / "WH" / "Articles" / "categorized"
     if sibling.is_dir():
         return sibling
-    home = Path.home() / "Documents" / "KnowledgeBase" / "Quant" / "WH" / "Articles" / "categorized"
+    home = Path.home() / "Documents" / "finance" / "KnowledgeBase" / "Quant" / "WH" / "Articles" / "categorized"
     if home.is_dir():
         return home
     return sibling

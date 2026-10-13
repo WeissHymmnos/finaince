@@ -67,6 +67,7 @@ def test_doctor_report_keys():
     assert "panel_stats" in report
     assert "ricequant_creds" in report
     assert "universe_claim_warning" in report
+    assert "evaluation_cores" in report
     
     assert isinstance(report["ricequant_creds"], bool)
     assert isinstance(report["panel_stats"], dict)
@@ -215,9 +216,54 @@ def test_doctor_reports_data_track_section(isolated_home):
     section = report["data_track"]
     assert section["manifest_present"] is True
     assert section["years_cached"] == [2023, 2024]
+    assert section["year_coverage"] == [2023, 2024]
     assert section["latest_year"] == 2024
     assert section["component_dates"] == 4
+    assert section["constituent_date_coverage"] == 4
+    assert isinstance(section["manifest_hash"], str) and len(section["manifest_hash"]) == 64
     assert isinstance(section["rq_creds"], bool)
+    cores = report["evaluation_cores"]
+    assert cores["citable_engine"] == "pit_core"
+    assert cores["catalog_engine"] is None
+    assert cores["catalog_writers"] == [
+        "loop._catalog_candidate",
+        "isolate.upsert_isolated",
+    ]
+    assert cores["same_ledger"] is False
+    assert cores["cores"]["pit_core"]["writes_catalog"] is False
+    assert cores["cores"]["pit_core"]["citable"] is True
+    assert cores["cores"]["engine_native"]["citable"] is False
+    assert cores["cores"]["engine_native"]["writes_catalog"] is False
+    assert cores["cores"]["qlib"]["writes_catalog"] is False
+    assert "missing pit cache" not in " ".join(report["issues"])
+
+
+def test_evaluation_cores_cache_miss_is_not_a_doctor_failure(isolated_home):
+    from finaince.eval.cores import evaluation_cores
+    from finaince.settings import doctor_report
+
+    cores = evaluation_cores()
+    assert cores["citable_engine"] is None
+    assert cores["catalog_engine"] is None
+    assert cores["catalog_writers"] == [
+        "loop._catalog_candidate",
+        "isolate.upsert_isolated",
+    ]
+    assert cores["cores"]["pit_core"]["ready"] is False
+    assert cores["cores"]["pit_core"]["citable"] is False
+    assert cores["cores"]["engine_native"]["writes_catalog"] is False
+    assert all(core["writes_catalog"] is False for core in cores["cores"].values())
+    report = doctor_report()
+    assert report["evaluation_cores"]["citable_engine"] is None
+    assert report["evaluation_cores"]["catalog_writers"] == [
+        "loop._catalog_candidate",
+        "isolate.upsert_isolated",
+    ]
+    track = report["data_track"]
+    assert track["year_coverage"] == []
+    assert track["constituent_date_coverage"] == 0
+    assert track["manifest_hash"] is None
+    assert not any("pit" in issue.lower() or "cache" in issue.lower() for issue in report["issues"])
 
 
 def test_live_fetch_refused_without_credentials(monkeypatch, isolated_home):

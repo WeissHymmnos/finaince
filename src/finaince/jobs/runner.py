@@ -155,7 +155,9 @@ def finish_job(
     try:
         from finaince.trace import record_job_finished
 
-        record_job_finished(out)
+        traced = record_job_finished(out)
+        if isinstance(traced, dict) and traced.get("id"):
+            out["trace_id"] = traced["id"]
     except Exception:
         pass
     return out
@@ -349,22 +351,27 @@ def get_job(job_id: str, *, reap: bool = True) -> dict[str, Any] | None:
 
 
 def list_jobs() -> list[dict[str, Any]]:
+    from finaince.trace import event_id_for_job
+
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, kind, status, error, engine_run_id, pid, created_at FROM jobs ORDER BY created_at DESC"
         ).fetchall()
-    return [
-        {
-            "id": r[0],
-            "kind": r[1],
-            "status": r[2],
-            "error": r[3],
-            "engine_run_id": r[4],
-            "pid": r[5],
-            "created_at": r[6],
-        }
-        for r in rows
-    ]
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "id": r[0],
+                "kind": r[1],
+                "status": r[2],
+                "error": r[3],
+                "engine_run_id": r[4],
+                "pid": r[5],
+                "created_at": r[6],
+                "trace_id": event_id_for_job(str(r[0])),
+            }
+        )
+    return items
 
 
 def run_reproduce_job(

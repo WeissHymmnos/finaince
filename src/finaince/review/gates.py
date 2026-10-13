@@ -181,6 +181,12 @@ def evaluate_gates(
 ) -> dict[str, Any]:
     failures: list[str] = []
     skipped = set(override or [])
+    # Provenance is not overridable: a missing contract or a non-citable
+    # engine cannot be the basis of promotion.
+    if not (record.engine and record.window_start and record.window_end):
+        failures.append("unprovenanced")
+    if not record.citable:
+        failures.append("not_citable")
     if record.is_simulated:
         failures.append("simulated")
     if record.lineage.formula_proxy:
@@ -253,14 +259,25 @@ def evaluate_gates(
     details: dict[str, Any] = {}
     
     if "weak_ic" not in skipped:
-        ic_ir = record.metrics.extra.get("ic_ir")
+        field_name: str | None = None
+        ic_ir = None
+        if record.metrics.rank_icir is not None:
+            field_name = "rank_icir"
+            ic_ir = record.metrics.rank_icir
+        elif record.metrics.icir is not None:
+            field_name = "icir"
+            ic_ir = record.metrics.icir
+        elif record.metrics.extra.get("ic_ir") is not None:
+            field_name = "icir"
+            ic_ir = record.metrics.extra.get("ic_ir")
         n_days = len(returns) if returns else None
         t_stat = ic_t_stat(ic_ir, n_days)
         if t_stat is None:
             details["weak_ic"] = "insufficient_for_t_stat"
         elif abs(t_stat) < 3.0:
             failures.append("weak_ic")
-            details["weak_ic"] = f"t_stat={t_stat:.2f}"
+            used = field_name or "icir"
+            details["weak_ic"] = f"field={used} t_stat={t_stat:.2f}"
             
     if "inflated_sharpe" not in skipped:
         try:

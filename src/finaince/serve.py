@@ -319,11 +319,9 @@ def create_app() -> Any:
 
         if (body or {}).get("override"):
             raise HTTPException(status_code=403, detail="http approve cannot honor override")
-        adversary_raw = (body or {}).get("adversary", False)
-        if adversary_raw not in (True, False, None):
-            raise HTTPException(400, "adversary must be a boolean")
-        adversary = bool(adversary_raw)
-        return approve(promotion_id, override=None, adversary=adversary)
+        if "adversary" in (body or {}) and (body or {}).get("adversary") is not True:
+            raise HTTPException(status_code=400, detail="http approve cannot skip adversary")
+        return approve(promotion_id, override=None, adversary=True)
 
     @app.post("/api/v1/review/{promotion_id}/adversary")
     def review_adversary(request: Request, promotion_id: str) -> dict[str, Any]:

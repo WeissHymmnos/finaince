@@ -42,13 +42,13 @@ def test_env_honored(monkeypatch):
 
 def test_gbm_without_libs():
     try:
-        import lightgbm
+        import lightgbm  # noqa: F401
         pytest.skip("lightgbm is installed")
     except ImportError:
         pass
         
     try:
-        import sklearn
+        import sklearn  # noqa: F401
         pytest.skip("sklearn is installed")
     except ImportError:
         pass
@@ -61,10 +61,10 @@ def test_gbm_without_libs():
 
 def test_gbm_real_path():
     try:
-        import lightgbm
+        import lightgbm  # noqa: F401
     except ImportError:
         try:
-            import sklearn
+            import sklearn  # noqa: F401
         except ImportError:
             pytest.skip("Neither lightgbm nor sklearn is installed")
             

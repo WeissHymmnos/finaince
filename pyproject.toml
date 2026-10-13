@@ -72,7 +72,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
     "live: real PDF / RiceQuant / chat LLM calls (network, credentials)",
 ]

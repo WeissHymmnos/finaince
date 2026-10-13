@@ -8,10 +8,12 @@
 | 状态 | Accepted |
 | 受众 | 会读 `finaince` / `aiminer` / `reproagent` / `rustminer` 源码的资深工程师 |
 | 工作区 | `/home/wh/Documents` |
-| 前置 | `/home/wh/Documents/finaince/docs/platform-improvement.md`（Accepted，2026-08-13） |
+| 前置 | `/home/wh/Documents/finance/finaince/docs/platform-improvement.md`（Accepted，2026-08-13） |
 
 ---
 
+> **历史设计文档。** 当前评测核以 [architecture.md](architecture.md) 为准。
+>
 > 勘误（2026-08）：本文为历史设计文档。§API 中通用 `POST /api/v1/jobs {kind, payload}` 端点从未实现；job 提交走 `/api/v1/reproduce` 与 `/api/v1/loop`，取消走 `POST /api/v1/jobs/{id}/cancel`。实际接口以 docs/handbook.md 为准。
 
 ## Overview
@@ -21,7 +23,7 @@
 第二代不再发明第三套引擎，也不重写 LangGraph / 研报流水线。它针对两件事做增量彻底改进：
 
 1. **交付与契约缺口**：`finaince[reproduction]` / `[discovery]` 仍是空 extra；`library` CLI 仍先扫引擎库；没有 `GET /api/v1/catalog/{id}`；`validation_status=synthetic` 未落地；qlib 只是结构占位却没有诚实对外说明；方言翻译只有 `is_listed` 布尔，没有 `alt_text`。
-2. **真生产踩坑固化成纪律**：mock 读到 `LLM_API_KEY` 打真实 DeepSeek、CPA thinking 模型 + instructor `tool_choice` 400、米筐 `Int64` → Polars、`formula_proxy` 污染整篇 catalog、swarm 写 cwd `results/`、CPA key 被官方 `DEEPSEEK_API_KEY` 盖成 401、wiki embedding 落到 gptsapi、`~/Documents/Data` 4 股 2005Q1 不够当 CSI300。
+2. **真生产踩坑固化成纪律**：mock 读到 `LLM_API_KEY` 打真实 DeepSeek、CPA thinking 模型 + instructor `tool_choice` 400、米筐 `Int64` → Polars、`formula_proxy` 污染整篇 catalog、swarm 写 cwd `results/`、CPA key 被官方 `DEEPSEEK_API_KEY` 盖成 401、wiki embedding 落到 gptsapi、`~/Documents/finance/data/samples` 4 股 2005Q1 不够当 CSI300。
 
 目标态：一份可安装的 3.12 `finaince[reproduction]`（**同时**拉 `reproagent` + 瘦 `aiminer`，才能 `import reproagent` 与 `cull_alpha_pool`）、一份 3.10 `aiminer[all]` swarm 拓扑；catalog 是研究员与 Agent 的第一索引；求值不撒谎；工作台 Review / Reproduce / Agent 是可用流程而不是 JSON dump；晋升 fail-closed；swarm 产物只落 `FINAINCE_HOME`。
 
@@ -129,11 +131,11 @@ aiminer extras 本身已经按第一代 K6 瘦身：默认 deps 只有 pydantic/
 | 6 | Wiki embedding 把 DeepSeek 落到 gptsapi 401 | `resolve_embedding_backend` chat-only → 本地 bge | `swarm_argv` 继续强制 `--embedding-provider local` |
 | 7 | `os.killpg` / `/home/wh` / conda `bin/python` | `finaince.compat` | doctor 报告 `os_name` / `aiminer_python` / 进程树策略 |
 | 8 | 广发系列 5 真抽取可 `no_factors` | pipeline 已返回结构化 status | 工作台 / Agent 必须展示 `no_factors`，禁止改写成 mock 因子 |
-| 9 | `~/Documents/Data` 仅 4 股、2005Q1 | `detect_local_date_range` 自动窗 | **禁止**在该面板上声称 `universe=csi300` 的真实回测；自动降级或要求米筐 |
+| 9 | `~/Documents/finance/data/samples` 仅 4 股、2005Q1 | `detect_local_date_range` 自动窗 | **禁止**在该面板上声称 `universe=csi300` 的真实回测；自动降级或要求米筐 |
 
 ### 痛点（量化，针对剩余缺口）
 
-- 新同事按 README `uv pip install -e ".[reproduction]"` 装完，`import reproagent` 只在作者机器上因为 `_paths` 碰巧找到 `/home/wh/Documents/reproagent/src` 才成功。干净 venv 没有兄弟目录就会炸。
+- 新同事按 README `uv pip install -e ".[reproduction]"` 装完，`import reproagent` 只在作者机器上因为 `_paths` 碰巧找到 `/home/wh/Documents/finance/reproagent/src` 才成功。干净 venv 没有兄弟目录就会炸。
 - 研究员跑 `finaince library` 看不到刚刚双写进 catalog 的 discovery 行。
 - Agent 调 `search_library`（SDK 工具）与 `catalog_list` 看到两套世界。
 - `desk._write_library` 把合成报告标成 `validation_status="valid"`，library UI 无法区分「真研报」和「挖掘晋升」。
@@ -571,7 +573,7 @@ formula_proxy=true 的行必须告诉用户，不得 promote。
 - local → parquet `trade_date` min/max；
 - 否则米筐默认 `2024-01-02`–`2024-03-29`（`RQ_EVAL_START/END`）。
 
-本代加：`local_panel_stats()` 返回 `{n_assets, n_days, start, end}`。`n_assets < 50` 或 `n_days < 60` → 面板 thin（`~/Documents/Data` 实测 4 股、57 个交易日，两条都触发）。
+本代加：`local_panel_stats()` 返回 `{n_assets, n_days, start, end}`。`n_assets < 50` 或 `n_days < 60` → 面板 thin（`~/Documents/finance/data/samples` 实测 4 股、57 个交易日，两条都触发）。
 
 默认 universe 跟着面板走，**不是**再写死 CSI300：
 
@@ -955,7 +957,7 @@ validation_status: Literal["pending", "valid", "invalid", "synthetic"] = "pendin
 
 ## References
 
-- 第一代：`/home/wh/Documents/finaince/docs/platform-improvement.md`
+- 第一代：`/home/wh/Documents/finance/finaince/docs/platform-improvement.md`
 - `finaince/src/finaince/{cli,settings,runtime,compat,_paths,serve,tools,sdk_ext,agent,agent_playbook}.py`
 - `finaince/src/finaince/{catalog,domain,eval,review,jobs}/`
 - `finaince/pyproject.toml`（`reproduction = ["reproagent", "aiminer"]`）
@@ -963,7 +965,7 @@ validation_status: Literal["pending", "valid", "invalid", "synthetic"] = "pendin
 - `reproagent/src/reproagent/{pipeline,mcp_server,models/report,persistence/tables,reproducer/{metrics,data_loader,run_flags}}.py`
 - `aiminer/frontend/src/{App.tsx,components/Layout.tsx,pages/{Catalog,Review,Reproduce,Agent}Page.tsx}`
 - `finaince/tests/{test_platform,test_live_real,test_compat,conftest}.py`
-- 知识库 PDF：`/home/wh/Documents/KnowledgeBase/Quant/WH/Articles/categorized`
+- 知识库 PDF：`/home/wh/Documents/finance/KnowledgeBase/Quant/WH/Articles/categorized`
 
 ---
 

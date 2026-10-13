@@ -10,22 +10,29 @@ def _is_num(value: Any) -> bool:
     return True
 
 def _portfolio_return(curve: dict[str, float]) -> float | None:
-    if len(curve) < 2:
+    if not curve:
         return None
     keys = sorted(curve)
-    start = float(curve[keys[0]])
     end = float(curve[keys[-1]])
-    if start == 0:
-        return None
-    return end / start - 1.0
+    return end - 1.0
 
-def train_head(returns: dict[str, float], *, kind: str | None = None) -> dict[str, Any]:
+def train_head(
+    returns: dict[str, float],
+    *,
+    kind: str | None = None,
+    min_train: int = 10,
+    cost_bps: float = 5.0,
+    **kwargs: Any,
+) -> dict[str, Any]:
     """
     Train a predictive model head on factor returns.
     
     Args:
         returns: Dictionary mapping dates to returns.
         kind: Model kind ('ols' or 'gbm'). If None, reads FINAINCE_MODEL_HEAD env var.
+        min_train: Minimum initial training window size.
+        cost_bps: Turnover transaction cost in basis points.
+        **kwargs: Additional model parameters.
         
     Returns:
         Dictionary with model configuration, equity curve, and portfolio return.
@@ -35,18 +42,23 @@ def train_head(returns: dict[str, float], *, kind: str | None = None) -> dict[st
         
     if kind == "ols":
         from finaince.loop import train_linear_head
-        return train_linear_head(returns)
+        return train_linear_head(returns, min_train=min_train, cost_bps=cost_bps, **kwargs)
     elif kind == "gbm":
-        return _train_gbm_head(returns)
+        return _train_gbm_head(returns, min_train=min_train, cost_bps=cost_bps, **kwargs)
     else:
         from finaince.loop import train_linear_head
-        res = train_linear_head(returns)
+        res = train_linear_head(returns, min_train=min_train, cost_bps=cost_bps, **kwargs)
         if "model_config" in res:
             res["model_config"]["requested_kind"] = kind
         return res
 
-def _train_gbm_head(returns: dict[str, float]) -> dict[str, Any]:
-    config: dict[str, Any] = {"kind": "gbm", "lags": 5}
+def _train_gbm_head(
+    returns: dict[str, float],
+    min_train: int = 10,
+    cost_bps: float = 5.0,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    config: dict[str, Any] = {"kind": "gbm", "lags": 5, "min_train": min_train, "cost_bps": cost_bps}
     
     backend = None
     ModelClass = None
@@ -89,7 +101,6 @@ def _train_gbm_head(returns: dict[str, float]) -> dict[str, Any]:
     y = vals[lags:]
     y_keys = keys[lags:]
     
-    min_train = 10
     preds = []
     realized = []
     pred_keys = []
@@ -113,10 +124,17 @@ def _train_gbm_head(returns: dict[str, float]) -> dict[str, Any]:
         
     preds = np.array(preds)
     realized = np.array(realized)
-    pnl = preds * realized
     
-    curve_vals = np.cumprod(1.0 + pnl)
-    curve = {str(k): float(v) for k, v in zip(pred_keys, curve_vals, strict=False)}
+    positions = np.clip(preds * 20.0, -1.0, 1.0)
+    turnovers = np.abs(np.diff(np.insert(positions, 0, 0.0)))
+    costs = (cost_bps / 10000.0) * turnovers
+    pnl = positions * realized - costs
+    
+    equity = 1.0
+    curve: dict[str, float] = {}
+    for k, p in zip(pred_keys, pnl, strict=False):
+        equity = max(1e-12, equity * (1.0 + float(p)))
+        curve[str(k)] = float(equity)
     
     config["n_obs"] = len(preds)
     

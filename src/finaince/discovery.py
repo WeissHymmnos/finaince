@@ -148,7 +148,24 @@ def cull_factor_pool(results_list: list[dict[str, Any]]) -> list[dict[str, Any]]
         mirror = reflect_sign(candidate)
         if mirror is not None:
             mirrored.append(mirror)
-    pool = cull_alpha_pool(deduped + mirrored)
+    from aiminer.manager import PortfolioManager
+
+    original = PortfolioManager.evaluate_and_combine
+
+    def _with_trial_count(self, rows):  # type: ignore[no-untyped-def]
+        if not hasattr(self, "n_trials"):
+            self.n_trials = 0
+        if not hasattr(self, "trial_sharpes"):
+            self.trial_sharpes = []
+        if not hasattr(self, "strategy_pool"):
+            self.strategy_pool = []
+        return original(self, rows)
+
+    PortfolioManager.evaluate_and_combine = _with_trial_count  # type: ignore[method-assign]
+    try:
+        pool = cull_alpha_pool(deduped + mirrored)
+    finally:
+        PortfolioManager.evaluate_and_combine = original  # type: ignore[method-assign]
     return list(pool)
 
 

@@ -25,6 +25,10 @@ def test_adversary_happy_path(isolated_home: Path):
         name="adv_happy",
         expression=FactorExpression(dialect="repro_polars", text="Rank(Delta(close, 7))"),
         universe="local_panel",
+        engine="engine_native",
+        window_start="2023-01-03",
+        window_end="2023-02-10",
+        citable=True,
         metrics=FactorMetrics(
             ic=res.metrics.get("ic_mean"),
             sharpe=res.metrics.get("sharpe_ratio"),
@@ -72,6 +76,10 @@ def test_adversary_tamper_case(isolated_home: Path):
         name="adv_tamper",
         expression=FactorExpression(dialect="repro_polars", text="Rank(Delta(close, 7))"),
         universe="local_panel",
+        engine="engine_native",
+        window_start="2023-01-03",
+        window_end="2023-02-10",
+        citable=True,
         metrics=FactorMetrics(
             ic=0.99, # Wildly different from real IC
             sharpe=res.metrics.get("sharpe_ratio"),
@@ -88,7 +96,11 @@ def test_adversary_tamper_case(isolated_home: Path):
     assert promo["ok"]
     pid = promo["promotion_id"]
     
-    app = approve(pid, adversary=True)
+    app = approve(
+        pid,
+        adversary=True,
+        override=["thin_panel", "weak_ic", "inflated_sharpe", "homogeneous"],
+    )
     assert not app["ok"]
     assert app["error"] == "adversary_rejected"
     assert app["adversary"]["verdict"] == "rejected"
@@ -116,6 +128,10 @@ def test_adversary_proxy_case(isolated_home: Path):
         name="adv_proxy",
         expression=FactorExpression(dialect="repro_polars", text="Rank(Delta(close, 7))"),
         universe="local_panel",
+        engine="engine_native",
+        window_start="2023-01-03",
+        window_end="2023-02-10",
+        citable=True,
         metrics=FactorMetrics(
             ic=res.metrics.get("ic_mean"),
             sharpe=res.metrics.get("sharpe_ratio"),
@@ -134,12 +150,16 @@ def test_adversary_proxy_case(isolated_home: Path):
     
     app = approve(pid, adversary=True)
     assert not app["ok"]
-    assert app["error"] == "adversary_rejected"
-    
-    proxy_check = next(c for c in app["adversary"]["checks"] if c["name"] == "not_proxy")
-    assert not proxy_check["ok"]
+    assert app["error"] == "gates_failed"
+    assert "formula_proxy" in app["gates"]["failures"]
+    from finaince.review.adversary import adversarial_review
 
-def test_adversary_default_false(isolated_home: Path):
+    report = adversarial_review(pid)
+    proxy_check = next(c for c in report["checks"] if c["name"] == "not_proxy")
+    assert not proxy_check["ok"]
+    assert report["verdict"] == "rejected"
+
+def test_adversary_default_on(isolated_home: Path):
     req = EvalRequest(
         expression="Rank(Delta(close, 7))",
         dialect="repro_polars",
@@ -154,8 +174,12 @@ def test_adversary_default_false(isolated_home: Path):
         name="adv_default",
         expression=FactorExpression(dialect="repro_polars", text="Rank(Delta(close, 7))"),
         universe="local_panel",
+        engine="engine_native",
+        window_start="2023-01-03",
+        window_end="2023-02-10",
+        citable=True,
         metrics=FactorMetrics(
-            ic=0.99, # Tampered, but adversary is off
+            ic=0.99,  # Tampered. Default approve re-evaluates and rejects.
             sharpe=res.metrics.get("sharpe_ratio"),
         ),
         daily_returns=res.metrics.get("daily_returns", {}),
@@ -170,9 +194,6 @@ def test_adversary_default_false(isolated_home: Path):
     assert promo["ok"]
     pid = promo["promotion_id"]
     
-    # Default is False, so it should pass (or fail on normal gates, but not adversary)
-    # Wait, IC=0.99 might fail weak_ic gate? No, weak_ic fails if IC is too low.
-    # But let's override gates just in case.
-    app = approve(pid, override=["weak_ic", "inflated_sharpe", "thin_panel"])
-    assert app["ok"]
-    assert "adversary" not in app["gates"]
+    app = approve(pid, override=["weak_ic", "inflated_sharpe", "thin_panel", "homogeneous"])
+    assert app["ok"] is False
+    assert app["error"] == "adversary_rejected"

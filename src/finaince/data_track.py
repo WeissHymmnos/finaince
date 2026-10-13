@@ -169,6 +169,47 @@ def universe_for_date(day: date, comp: dict[date, list[str]]) -> list[str]:
     return comp[max(eligible)]
 
 
+def write_suspensions(asof: date, codes: list[str]) -> Path:
+    """Record names that cannot trade on ``asof`` (suspension day)."""
+    import polars as pl
+
+    directory = track_root() / "suspensions"
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"suspended_{asof.isoformat()}.parquet"
+    pl.DataFrame({"ts_code": sorted({str(c) for c in codes})}).write_parquet(target)
+    return target
+
+
+def suspensions_map() -> dict[date, set[str]]:
+    directory = track_root() / "suspensions"
+    out: dict[date, set[str]] = {}
+    if not directory.is_dir():
+        return out
+    import polars as pl
+
+    for path in sorted(directory.glob("suspended_*.parquet")):
+        token = path.stem.removeprefix("suspended_")
+        try:
+            asof = date.fromisoformat(token)
+        except ValueError:
+            continue
+        out[asof] = set(pl.read_parquet(path)["ts_code"].to_list())
+    return out
+
+
+def tradable_members(
+    day: date,
+    comp: dict[date, list[str]],
+    suspended: dict[date, set[str]] | None = None,
+) -> list[str]:
+    """Rebalance snapshot minus names suspended on ``day``."""
+    members = universe_for_date(day, comp)
+    banned = (suspended if suspended is not None else suspensions_map()).get(day) or set()
+    if not banned:
+        return members
+    return [code for code in members if code not in banned]
+
+
 def has_rq_credentials() -> bool:
     return bool((os.environ.get("RQ_USER") or "").strip()) and bool(
         (os.environ.get("RQ_PASS") or "").strip()
@@ -218,7 +259,7 @@ def fetch_year_live(year: int) -> Path:
         end_date=end,
         frequency="1d",
         fields=["open", "high", "low", "close", "volume", "total_turnover"],
-        adjust_type="pre",
+        adjust_type="post",
         expect_df=True,
     )
     pdf = frame.reset_index()
@@ -301,7 +342,9 @@ def _forward_returns(frame: Any) -> Any:
 
     panel = frame.sort(["ts_code", "trade_date"])
     return panel.with_columns(
-        (pl.col("close").shift(-1) / pl.col("close") - 1.0)
+        pl.when(pl.col("close") > 1e-6)
+        .then(pl.col("close").shift(-1) / pl.col("close") - 1.0)
+        .otherwise(None)
         .over("ts_code")
         .alias("_fwd_ret")
     ).select(["trade_date", "ts_code", "_fwd_ret"])
@@ -464,6 +507,7 @@ def _metrics_from_artifacts(artifacts: dict[str, Any], cost_bps: float) -> dict[
         "ic": ic_mean,
         "rank_ic": rank_mean,
         "icir": ic_ir,
+        "rank_icir": rank_ir,
         **_window_metrics(ls, cost_bps, turnover),
     }
 
@@ -508,6 +552,8 @@ def run_bench(
     costs: list[float] | None = None,
     embargo: bool = True,
     neutralize_vs: list[str] | None = None,
+    expression: str | None = None,
+    neutralize_industry: bool = False,
 ) -> dict[str, Any]:
     """Citable double-window benchmark table over the cached point-in-time universe."""
 
@@ -524,7 +570,8 @@ def run_bench(
         "universe_source": "point_in_time",
         "index_code": INDEX_CODE,
         "data_version": CACHE_VERSION,
-        "turnover_model": "per_day_quintile_membership_churn (participation proxy, not dollar turnover)",
+        "turnover_model": "quintile_membership_churn",
+        "turnover_model_note": "per-day quintile membership churn; participation proxy, not dollar turnover",
         "manifest": read_manifest(),
     }
     try:
@@ -557,31 +604,53 @@ def run_bench(
             return {"ok": False, "error": f"unknown neutralize_vs seeds: {invalid}", "provenance": provenance}
         controls = [c for c in neutralize_vs]
 
+    neutralization = "off"
+    if neutralize_industry:
+        if "industry" not in frame.columns:
+            neutralization = "skipped_no_industry"
+        else:
+            neutralization = "industry"
+    provenance["neutralization"] = neutralization
+    provenance["neutralized"] = neutralization == "industry"
+
+    suspended = suspensions_map()
     universe_by_day_all: dict[Any, set[str]] = {}
     for day in set(frame["trade_date"].to_list()):
-        members = universe_for_date(day, comp)
+        members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
 
     forwards = _forward_returns(frame)
+    from finaince.eval.pit_core import metrics_for_window, score_expression
+
     table: list[dict[str, Any]] = []
     artifacts_by_factor: dict[str, dict[str, dict[str, Any]]] = {}
-    for name, expression in SEED_FACTORS:
-        if neutralize_vs:
+    factor_rows: list[tuple[str, str]] = list(SEED_FACTORS)
+    if expression:
+        factor_rows.append(("expression", expression))
+    for name, expr in factor_rows:
+        if name == "expression":
+            try:
+                scores = score_expression(frame, expr)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc), "provenance": provenance}
+        elif neutralize_vs and neutralization != "skipped_no_industry":
             scores = _neutralize_scores(frame, name, [c for c in controls if c != name])
         else:
             scores = _factor_scores(frame, name)
         row: dict[str, Any] = {
             "factor": name,
-            "expression": expression,
+            "expression": expr,
             "dialect": "repro_polars",
+            "neutralized": provenance["neutralized"],
         }
         factor_arts: dict[str, dict[str, Any]] = {}
         for label, (w_start, w_end) in windows.items():
             scoped = _scoped_universe(universe_by_day_all, w_start, w_end, embargo=embargo)
-            arts = _factor_artifacts(scores, forwards, scoped)
-            factor_arts[label] = arts
-            row[label] = _metrics_from_artifacts(arts, cost_bps)
+            factor_arts[label] = _factor_artifacts(scores, forwards, scoped)
+            row[label] = metrics_for_window(
+                scores, forwards, universe_by_day_all, w_start, w_end, cost_bps, embargo=embargo
+            )
         artifacts_by_factor[name] = factor_arts
         table.append(row)
 
@@ -661,9 +730,10 @@ def run_walkforward(
             return {"ok": False, "error": f"unknown neutralize_vs seeds: {invalid}", "provenance": provenance}
         controls = list(neutralize_vs)
 
+    suspended = suspensions_map()
     universe_by_day_all: dict[Any, set[str]] = {}
     for day in set(frame["trade_date"].to_list()):
-        members = universe_for_date(day, comp)
+        members = tradable_members(day, comp, suspended)
         if members:
             universe_by_day_all[day] = set(members)
     forwards = _forward_returns(frame)
@@ -762,14 +832,20 @@ def doctor_section() -> dict[str, Any]:
             if entry.is_dir() and entry.name.isdigit():
                 if (_year_dir(int(entry.name)) / f"csi300_{entry.name}.parquet").exists():
                     years.append(int(entry.name))
+    years_sorted = sorted(years)
     comp = components_map()
+    manifest_file = manifest_path()
+    manifest_hash = _sha256_of(manifest_file) if manifest_file.is_file() else None
     return {
         "cache_root": str(track_root()),
         "schema_version": CACHE_VERSION,
         "manifest_present": manifest is not None,
-        "years_cached": sorted(years),
-        "latest_year": max(years) if years else None,
+        "manifest_hash": manifest_hash,
+        "years_cached": years_sorted,
+        "year_coverage": years_sorted,
+        "latest_year": max(years_sorted) if years_sorted else None,
         "component_dates": len(comp),
+        "constituent_date_coverage": len(comp),
         "first_component_date": min(comp).isoformat() if comp else None,
         "rq_creds": has_rq_credentials(),
     }

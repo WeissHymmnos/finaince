@@ -124,13 +124,6 @@ def test_extras_pinned_to_immutable_sha() -> None:
 
 
 def test_path_hack_off_by_default_in_subprocess() -> None:
-    code = (
-        "import os, sys\n"
-        "os.environ.pop('FINAINCE_PATH_HACK', None)\n"
-        "os.environ.pop('FINAINCE_NO_PATH_HACK', None)\n"
-        "import finaince._paths as p\n"
-        "print(json.dumps({'disabled': p.path_hack_disabled(), 'path': sys.path[:8]}))\n"
-    )
     # injected via -c after import json
     proc = subprocess.run(
         [
@@ -234,12 +227,9 @@ def test_isolate_blocks_open_and_does_not_fabricate_returns(isolated_home: Path,
     assert good.get("daily_returns") == {}
     assert good.get("ic") is None
     stored = upsert_isolated(good, universe="local_panel")
-    assert stored.get("ok") is True
-    rec = stored["record"]
-    assert rec.daily_returns == {}
-    assert rec.metrics.ic is None
-    assert rec.is_simulated is True
-    assert not any(str(k).startswith("2024-01-") for k in rec.daily_returns)
+    assert stored.get("ok") is False
+    assert stored.get("error") == "not_scored"
+    assert stored.get("catalog_id") is None
 
 
 def test_read_routes_require_desk_token(isolated_home: Path) -> None:

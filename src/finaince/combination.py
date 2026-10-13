@@ -161,11 +161,14 @@ def try_combine_ready(*, min_factors: int = 2, limit: int = 50) -> dict[str, Any
         records = [
             record
             for record in FactorCatalog().list(status="ready")[:limit]
-            if record.daily_returns
+            if record.daily_returns and record.engine == "pit_core"
         ]
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": f"catalog_unavailable:{exc}"}
     if len(records) < min_factors:
         return {"ok": False, "reason": "insufficient_ready_factors", "n_ready_with_returns": len(records)}
+    windows = {(record.window_start, record.window_end) for record in records}
+    if len(windows) != 1 or None in next(iter(windows)):
+        return {"ok": False, "reason": "incompatible_windows", "windows": [list(w) for w in windows]}
     payload = {record.id: {str(k): float(v) for k, v in record.daily_returns.items()} for record in records}
     return combine_daily(payload)
