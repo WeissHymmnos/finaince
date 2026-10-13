@@ -15,6 +15,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 
+from finaince._swallow import log_swallowed
+
 _WIKILINK = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 
 
@@ -116,8 +118,8 @@ def _factor_items() -> list[dict[str, Any]]:
                     "daily_returns": item.get("returns") or {},
                 }
             )
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.aiminer_fallback:119", _exc)
     if rows:
         return rows
     from finaince.catalog.store import FactorCatalog

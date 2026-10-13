@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from finaince._swallow import log_swallowed
+
 try:
     from claude_agent_sdk import (
         AgentDefinition,
@@ -495,8 +497,8 @@ def inspect_post_tool_use(event: Any) -> dict[str, Any]:
 
         n = len(FactorCatalog().list())
         hint = f"catalog_size={n}; {hint}"
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.sdk_ext:498", _exc)
     return {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",

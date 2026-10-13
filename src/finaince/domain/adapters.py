@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from finaince._swallow import log_swallowed
 from finaince.domain.factor import (
     FactorExpression,
     FactorLineage,
@@ -152,8 +153,8 @@ def from_library_entry(entry: Any, *, extras: dict[str, Any] | None = None) -> F
 
         if local_panel_is_thin() and _claims_broad_universe(universe):
             universe = "local_panel"
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.domain.adapters:155", _exc)
     return FactorRecord(
         id=_new_id(),
         name=factor.name,

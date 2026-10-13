@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from finaince._swallow import log_swallowed
 from finaince.compat import (
     current_pgid,
     pid_alive,
@@ -150,14 +151,14 @@ def finish_job(
         from finaince.catalog.audit import append as audit_append
 
         audit_append("job_finished", {"job_id": job_id, "kind": kind, "status": status})
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.jobs.runner:153", _exc)
     try:
         from finaince.obs import emit
 
         emit("job_finished", kind=kind, status=status, elapsed_ms=elapsed_ms)
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.jobs.runner:159", _exc)
     out = dict(row)
     if result is not None:
         out["result"] = result
@@ -167,8 +168,8 @@ def finish_job(
         traced = record_job_finished(out)
         if isinstance(traced, dict) and traced.get("id"):
             out["trace_id"] = traced["id"]
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.jobs.runner:170", _exc)
     return out
 
 

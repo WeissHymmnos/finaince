@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from finaince._swallow import log_swallowed
 from finaince.catalog.hooks import accept_library_entry, accept_pool_row
 from finaince.catalog.store import FactorCatalog
 from finaince.settings import get_settings
@@ -60,8 +61,8 @@ def rebuild(*, source: str | None = None) -> dict[str, Any]:
                 from finaince.obs import emit
 
                 emit("rebuild_reproduction_failed", error=str(exc)[:300])
-            except Exception:
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed("finaince.catalog.rebuild:63", _exc)
     return {"ok": True, "counts": counts, "total": len(FactorCatalog().list())}
 
 
@@ -121,8 +122,8 @@ def retag_synthetic() -> dict[str, Any]:
             from finaince.obs import emit
 
             emit("retag_synthetic_failed", error=reports_error)
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.catalog.rebuild:124", _exc)
     return {
         "ok": True,
         "catalog_tagged": tagged,

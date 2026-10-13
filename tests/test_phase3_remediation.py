@@ -454,3 +454,83 @@ def test_terminate_process_tree_escalates_to_sigkill() -> None:
     assert pid_alive(proc.pid)
     terminate_process_tree(proc.pid, timeout=0.3)
     assert not pid_alive(proc.pid)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 roadmap: observable excepts, unified cost model, template semantics
+# ---------------------------------------------------------------------------
+
+
+def test_no_silent_broad_except_pass_in_src() -> None:
+    """ISSUE-R4-04: broad ``except Exception: pass`` must log instead of vanishing."""
+    import re
+
+    pat = re.compile(
+        r"^[ \t]*except (?:Exception|BaseException)(?: as \w+)?:[ \t]*(?:#[^\n]*)?\n[ \t]+pass\b"
+        r"|^[ \t]*except (?:Exception|BaseException)(?: as \w+)?:[ \t]*pass\b",
+        re.M,
+    )
+    offenders = [
+        str(p)
+        for p in Path("src/finaince").rglob("*.py")
+        if pat.search(p.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
+def test_log_swallowed_emits_warning(caplog) -> None:
+    import logging
+
+    from finaince._swallow import log_swallowed
+
+    with caplog.at_level(logging.WARNING, logger="finaince.swallowed"):
+        log_swallowed("mod:1", ValueError("boom"))
+    assert any("ValueError" in r.getMessage() and "mod:1" in r.getMessage() for r in caplog.records)
+
+
+def test_cost_model_charges_both_legs() -> None:
+    from finaince.domain.costs import ls_trading_cost, weight_l1_cost
+
+    # mean leg churn 0.5 -> long churn + short churn = 1.0 of notional traded
+    assert ls_trading_cost(0.5, 10.0) == pytest.approx(0.001)
+    assert weight_l1_cost(1.0, 10.0) == pytest.approx(0.001)
+    assert ls_trading_cost(0.0, 50.0) == 0.0
+
+
+def test_window_metrics_net_cost_uses_unified_model() -> None:
+    from finaince.data_track import _window_metrics
+
+    days = [date(2024, 1, 1) + timedelta(days=i) for i in range(30)]
+    series = [(d, 0.001 * (1 + (i % 3))) for i, d in enumerate(days)]
+    churn = {d: 0.5 for d in days}
+    free = _window_metrics(series, 0.0, churn)
+    paid = _window_metrics(series, 10.0, churn)
+    # 10bps * (0.5 * 2 legs) = 10bps/day drag -> annualized return drops by 0.001*252
+    assert free["ar_net"] - paid["ar_net"] == pytest.approx(0.001 * 252.0, abs=1e-5)
+
+
+def test_sweep_templates_use_rolling_operators_and_are_listed() -> None:
+    from finaince.eval.dialects import attach_translation, translate_to_qlib
+    from finaince.sweep import TEMPLATES
+
+    for name in ("compression", "stoch"):
+        text = TEMPLATES[name][1]("close", 5)
+        assert "Ts_Max(" in text and "Ts_Min(" in text
+        assert not any(tok in text.replace("Ts_Max(", "").replace("Ts_Min(", "") for tok in ("Max(", "Min("))
+        assert attach_translation(text, "repro_polars")["translatable"] is True
+    assert translate_to_qlib("-Rank(Ts_Max(close, 5) - Ts_Min(close, 5))") == (
+        "-Rank(Max($close, 5) - Min($close, 5))"
+    )
+
+
+def test_engine_ts_max_is_rolling_but_max_is_elementwise() -> None:
+    """Why [P1-07] matters: Max(x, n) in the engine is elementwise, Ts_Max is rolling."""
+    from reproagent.reproducer import polars_engine as pe
+
+    frame = pl.DataFrame({"asset": ["a"] * 5, "x": [1.0, 5.0, 2.0, 3.0, 4.0]})
+    out = frame.select(
+        pe.Ts_Max(pl.col("x"), 3).alias("ts"),
+        pe.Max(pl.col("x"), 3).alias("el"),
+    )
+    assert out["ts"].to_list()[2:] == [5.0, 5.0, 4.0]
+    assert out["el"].to_list() == [3.0, 5.0, 3.0, 3.0, 4.0]

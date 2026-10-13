@@ -12,6 +12,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from finaince.domain.costs import weight_l1_cost
+
 MIN_COVERAGE_RATIO = 0.6
 
 
@@ -104,7 +106,7 @@ def combine_daily(
         if prev_active is not None:
             churn = _turnover(prev_active, active)
             turnovers.append(churn)
-            gross -= (cost_bps / 10000.0) * churn * 2.0
+            gross -= weight_l1_cost(churn * 2.0, cost_bps)
         prev_active = active
         combo[day] = gross
 

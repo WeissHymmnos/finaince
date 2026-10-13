@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from finaince._swallow import log_swallowed
 from finaince.db import ensure_columns, ensure_database_initialized, managed_connection
 from finaince.domain.factor import FactorRecord
 from finaince.settings import get_settings
@@ -110,8 +111,8 @@ class FactorCatalog:
             from finaince.obs import emit
 
             emit("catalog_upsert", source=record.lineage.source)
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.catalog.store:113", _exc)
         return record
 
     @staticmethod
@@ -125,8 +126,8 @@ class FactorCatalog:
                 from finaince.obs import emit
 
                 emit("expr_hash_unavailable", error=str(exc)[:200])
-            except Exception:
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed("finaince.catalog.store:128", _exc)
             return ""
 
     def find_by_expr_hash(self, expression: str, dialect: str) -> list[dict[str, Any]]:
@@ -140,8 +141,8 @@ class FactorCatalog:
                 from finaince.obs import emit
 
                 emit("expr_hash_unavailable", error=str(exc)[:200])
-            except Exception:
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed("finaince.catalog.store:143", _exc)
             return []
         if not digest:
             return []

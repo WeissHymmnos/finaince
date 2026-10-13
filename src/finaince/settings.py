@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from finaince._swallow import log_swallowed
 from finaince.runtime import (
     aiminer_python,
     default_backtest_window,
@@ -89,8 +90,8 @@ class FinainceSettings(BaseSettings):
             from reproagent.settings import get_settings
 
             get_settings.cache_clear()
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.settings:92", _exc)
 
 
 def _parser_profile() -> str:

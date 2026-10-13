@@ -605,6 +605,7 @@ def _window_metrics(
     turnover_by_day: dict[Any, float] | None = None,
 ) -> dict[str, Any]:
     """Net-of-cost metrics; cost applied per-day when a turnover series is given."""
+    from finaince.domain.costs import ls_trading_cost
     from finaince.domain.scoring import max_drawdown, sharpe_ratio
 
     values = [r for _, r in ls_series]
@@ -614,7 +615,7 @@ def _window_metrics(
     net_values: list[float] = []
     for day, raw in ls_series:
         churn = turnover_by_day.get(day, 0.0) if turnover_by_day else 0.0
-        net_values.append(raw - (cost_bps / 10000.0) * churn)
+        net_values.append(raw - ls_trading_cost(churn, cost_bps))
     mean = sum(net_values) / n
     sharpe = sharpe_ratio(net_values)
     drawdown = max_drawdown(net_values)
@@ -797,6 +798,7 @@ def run_bench(
         "index_code": INDEX_CODE,
         "data_version": CACHE_VERSION,
         "turnover_model": "quintile_membership_churn",
+        "cost_model": "bps_x_sum_of_leg_churn",
         "turnover_model_note": "per-day quintile membership churn; participation proxy, not dollar turnover",
         "manifest": read_manifest(),
     }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from finaince._swallow import log_swallowed
 from finaince.domain.factor import FactorRecord
 
 _CSI300_CLAIMS = {
@@ -117,8 +118,8 @@ def _originality_corpus(exclude_id: str | None = None) -> list[tuple[str, str]]:
             from finaince.obs import emit
 
             emit("gate_corpus_degraded", source="seed_zoo", error=str(exc)[:200])
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.review.gates:120", _exc)
     try:
         from finaince.catalog.store import FactorCatalog
 
@@ -132,8 +133,8 @@ def _originality_corpus(exclude_id: str | None = None) -> list[tuple[str, str]]:
             from finaince.obs import emit
 
             emit("gate_corpus_degraded", source="catalog", error=str(exc)[:200])
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.review.gates:135", _exc)
     return corpus
 
 
@@ -290,8 +291,8 @@ def evaluate_gates(
                 from finaince.obs import emit
 
                 emit("trial_count_degraded", error=str(exc)[:200])
-            except Exception:
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed("finaince.review.gates:293", _exc)
             
         dsr = deflated_sharpe(returns, n_trials)
         if dsr is None:

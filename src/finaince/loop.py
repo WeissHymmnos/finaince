@@ -6,6 +6,8 @@ import json
 import os
 from typing import Any
 
+from finaince._swallow import log_swallowed
+
 
 def choose_next_action(history: list[dict[str, Any]] | None = None) -> str:
     """Pick factor vs model from prior portfolio metric / skip, not a blind flip.
@@ -133,8 +135,8 @@ def advise_action(history: list[dict[str, Any]]) -> dict[str, Any]:
                     from finaince.obs import emit
 
                     emit("advisor_context_degraded", source="chains_display", error=str(exc)[:200])
-                except Exception:
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    log_swallowed("finaince.loop:136", _exc)
             try:
                 from finaince.process_memory import context_block
 
@@ -146,16 +148,16 @@ def advise_action(history: list[dict[str, Any]]) -> dict[str, Any]:
                     from finaince.obs import emit
 
                     emit("advisor_context_degraded", source="context_block", error=str(exc)[:200])
-                except Exception:
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    log_swallowed("finaince.loop:149", _exc)
             prompt += "\n"
         except Exception as exc:
             try:
                 from finaince.obs import emit
 
                 emit("advisor_context_degraded", source="lessons_section", error=str(exc)[:200])
-            except Exception:
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed("finaince.loop:157", _exc)
 
         prompt += "History of last events:\n"
         for ev in history[-10:]:

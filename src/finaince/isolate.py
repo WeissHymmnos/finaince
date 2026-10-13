@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from finaince._swallow import log_swallowed
+
 FROZEN_MODULES = frozenset(
     {
         "math",
@@ -672,8 +674,8 @@ def _remember_isolate(result: dict[str, Any], *, name: str) -> dict[str, Any]:
             error=None if result.get("ok") else str(result.get("error") or "isolate_failed"),
             summary=f"isolate {name} ok={result.get('ok')}",
         )
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.isolate:675", _exc)
     result["similar_errors"] = similar_errors(None if result.get("ok") else str(result.get("error") or ""))
     return result
 

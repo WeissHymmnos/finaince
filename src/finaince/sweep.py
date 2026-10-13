@@ -107,11 +107,11 @@ TEMPLATES: dict[str, tuple[Callable[[str, int], Any], Callable[[str, int], str]]
     "shock": (_shock, lambda f, w: f"Rank(Div({f}, Mean({f}, {w})))"),
     "compression": (
         _compression,
-        lambda f, w: f"-Rank(Max({f}, {w}) - Min({f}, {w}))",
+        lambda f, w: f"-Rank(Ts_Max({f}, {w}) - Ts_Min({f}, {w}))",
     ),
     "stoch": (
         _stoch,
-        lambda f, w: f"Rank((({f}) - Min(low, {w})) / (Max(high, {w}) - Min(low, {w})))",
+        lambda f, w: f"Rank((({f}) - Ts_Min(low, {w})) / (Ts_Max(high, {w}) - Ts_Min(low, {w})))",
     ),
     "vratio": (
         _vratio,

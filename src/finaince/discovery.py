@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 from finaince._paths import ensure_import_paths
+from finaince._swallow import log_swallowed
 
 ensure_import_paths()
 
@@ -49,8 +50,8 @@ def _seed_zoo_corpus() -> list[tuple[str, str]]:
                     from finaince.obs import emit
 
                     emit("seed_zoo_degraded", error=str(exc)[:200])
-                except Exception:
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    log_swallowed("finaince.discovery:52", _exc)
                 return []
     return []
 
@@ -69,8 +70,8 @@ def structural_dedup(results_list: list[dict[str, Any]]) -> list[dict[str, Any]]
             from finaince.obs import emit
 
             emit("structural_dedup_disabled", error=str(exc)[:200])
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.discovery:72", _exc)
         return list(results_list)
 
     kept: list[dict[str, Any]] = []
@@ -101,8 +102,8 @@ def structural_dedup(results_list: list[dict[str, Any]]) -> list[dict[str, Any]]
             from finaince.obs import emit
 
             emit("structural_dedup", dropped=len(dropped), worst=max(d["max_sim"] for d in dropped))
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.discovery:104", _exc)
     return kept
 
 

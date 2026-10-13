@@ -10,6 +10,8 @@ operators:
   - {name: Sum, arity: 2}
   - {name: Max, arity: 2}
   - {name: Min, arity: 2}
+  - {name: Ts_Max, arity: 2}
+  - {name: Ts_Min, arity: 2}
   - {name: Abs, arity: 1}
   - {name: Log, arity: 1}
   - {name: Sign, arity: 1}

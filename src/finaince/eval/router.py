@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from finaince._swallow import log_swallowed
+
 
 @dataclass
 class EvalRequest:
@@ -153,8 +155,8 @@ def evaluate(req: EvalRequest) -> EvalResult:
             error=result.error,
             summary=f"eval {req.dialect} ok={result.ok}",
         )
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.eval.router:156", _exc)
     return result
 
 
@@ -323,8 +325,8 @@ def _evaluate(req: EvalRequest) -> EvalResult:
             from finaince.catalog.audit import append as audit_append
 
             audit_append("eval", {"expression": req.expression, "ok": ok, "rows": rows})
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.eval.router:326", _exc)
         emit(
             "eval_finished",
             dialect=req.dialect,

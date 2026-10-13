@@ -94,6 +94,7 @@ def score_frame_window(
         _metrics_from_artifacts,
         _scoped_universe,
     )
+    from finaince.domain.costs import ls_trading_cost
 
     scores = score_expression(frame, expression)
     forwards = _forward_returns(frame)
@@ -120,7 +121,7 @@ def score_frame_window(
     for day, raw in ls:
         churn = turnover.get(day, 0.0)
         key = day.isoformat() if hasattr(day, "isoformat") else str(day)[:10]
-        daily[key] = float(raw - (cost_bps / 10000.0) * churn)
+        daily[key] = float(raw - ls_trading_cost(churn, cost_bps))
     metrics["daily_returns"] = daily
     metrics["ic_mean"] = metrics.get("ic")
     metrics["sharpe_ratio"] = metrics.get("sharpe_net")

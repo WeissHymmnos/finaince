@@ -18,6 +18,8 @@ import os
 import textwrap
 from typing import Any
 
+from finaince._swallow import log_swallowed
+
 SEED_TEMPLATE = '''\
 NAME = "{name}"
 EXPRESSION = "{expression}"
@@ -244,8 +246,8 @@ def evolve_code_factor(
                 hypothesis=hypothesis,
                 extra={"draft_errors": [d["error"] for d in drafts]},
             )
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.code_evolution:247", _exc)
         return {
             "ok": True,
             "stage": "governed",

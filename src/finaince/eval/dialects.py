@@ -24,7 +24,8 @@ def translate_to_qlib(expression: str) -> str | None:
     text = re.sub(r"\blow\b", "$low", text)
     text = re.sub(r"\bvolume\b", "$volume", text)
     text = re.sub(r"\bamount\b", "$amount", text)
-    text = text.replace("Delta(", "Delta(")
+    # qlib spells rolling max/min as Max/Min(x, n); repro_polars Max/Min are elementwise.
+    text = text.replace("Ts_Max(", "Max(").replace("Ts_Min(", "Min(")
     return text
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from finaince._swallow import log_swallowed
 from finaince.catalog.store import FactorCatalog
 from finaince.domain.adapters import to_aiminer_dict
 from finaince.review.gates import evaluate_gates
@@ -26,8 +27,8 @@ def promote(catalog_id: str, *, direction: str, yes: bool = False) -> dict[str, 
         from finaince.obs import emit
 
         emit("promote_decision", direction=direction, passed=bool(gates.get("passed")), status="pending")
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.review.desk:29", _exc)
     return {"ok": True, "promotion_id": pid, "status": "review", "gates": gates, "confirmed": yes}
 
 
@@ -48,8 +49,8 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
             from finaince.obs import emit
 
             emit("promote_decision", direction=event["direction"], passed=False, status="gates_failed")
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.review.desk:51", _exc)
         return {"ok": False, "error": "gates_failed", "gates": gates}
     adv_res: dict[str, Any] | None = None
     if adversary:
@@ -94,8 +95,8 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
         from finaince.obs import emit
 
         emit("promote_decision", direction=event["direction"], passed=True, status="approved")
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.review.desk:97", _exc)
     return {"ok": True, "status": "ready", "gates": gates}
 
 
@@ -116,8 +117,8 @@ def reject(promotion_id: str) -> dict[str, Any]:
         from finaince.obs import emit
 
         emit("promote_decision", direction="reject", passed=False, status="rejected")
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.review.desk:119", _exc)
     return {"ok": True, "status": "rejected"}
 
 

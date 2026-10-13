@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import Request
 
+from finaince._swallow import log_swallowed
 from finaince.settings import get_settings
 
 # Fail-safe desk auth: /api/v1 is token-gated by default except this
@@ -201,8 +202,8 @@ def create_app() -> Any:
     try:
         _health_cache = _compute_health()
         _health_cache_ts = time.monotonic()
-    except Exception:
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        log_swallowed("finaince.serve:204", _exc)
 
     async def _refresh_health_bg() -> None:
         nonlocal _health_cache, _health_cache_ts, _health_updating
@@ -210,8 +211,8 @@ def create_app() -> Any:
             res = await asyncio.to_thread(_compute_health)
             _health_cache = res
             _health_cache_ts = time.monotonic()
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.serve:213", _exc)
         finally:
             _health_updating = False
 
@@ -225,8 +226,8 @@ def create_app() -> Any:
                 try:
                     _health_cache = await asyncio.to_thread(_compute_health)
                     _health_cache_ts = time.monotonic()
-                except Exception:
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    log_swallowed("finaince.serve:228", _exc)
                 finally:
                     _health_updating = False
             return _health_cache

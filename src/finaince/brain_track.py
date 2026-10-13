@@ -16,6 +16,8 @@ import os
 import time
 from typing import Any
 
+from finaince._swallow import log_swallowed
+
 DEFAULT_BRAIN_BASE = "https://api.worldquantbrain.com"
 
 
@@ -161,8 +163,8 @@ def submit_expression(
     finally:
         try:
             client.close()
-        except Exception:
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            log_swallowed("finaince.brain_track:164", _exc)
 
 
 def write_back(catalog_id: str, result: dict[str, Any]) -> dict[str, Any] | None:

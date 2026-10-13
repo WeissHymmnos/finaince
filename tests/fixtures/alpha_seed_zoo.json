@@ -20,7 +20,7 @@
     {"id": "vp_04", "family": "volume_price", "dialect": "repro_polars", "expr": "Rank(Div(volume, Mean(volume, 20)))"},
     {"id": "liq_01", "family": "liquidity", "dialect": "repro_polars", "expr": "Rank(Sum(volume, 5))"},
     {"id": "liq_02", "family": "liquidity", "dialect": "repro_polars", "expr": "Rank(Sum(volume, 60))"},
-    {"id": "range_01", "family": "price_range", "dialect": "repro_polars", "expr": "Rank(Div(Max(high, 20), Min(low, 20)))"},
+    {"id": "range_01", "family": "price_range", "dialect": "repro_polars", "expr": "Rank(Div(Ts_Max(high, 20), Ts_Min(low, 20)))"},
     {"id": "range_02", "family": "price_range", "dialect": "repro_polars", "expr": "-Rank(Div(Sub(high, low), Mean(close, 5)))"},
     {"id": "gap_01", "family": "gap", "dialect": "repro_polars", "expr": "Rank(Div(open, Ref(close, 1)))"},
     {"id": "gap_02", "family": "gap", "dialect": "repro_polars", "expr": "-Rank(Div(open, Ref(close, 1)) - 1)"},
