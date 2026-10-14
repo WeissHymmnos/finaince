@@ -120,9 +120,14 @@ def _patched_backtester_run(
         data = data.rename({"asset": "ts_code"})
 
     delay = max(1, int(getattr(params, "delay", 1) or 1))
+    shift_expr = (
+        pl.col("close").shift(-1).over("ts_code")
+        if delay == 1
+        else pl.col("close").shift(-delay).over("ts_code")
+    )
     data = data.sort(["ts_code", "trade_date"]).with_columns(
         pl.when(pl.col("close").abs() > 1e-12)
-        .then(pl.col("close").shift(-delay).over("ts_code") / pl.col("close") - 1)
+        .then(shift_expr / pl.col("close") - 1)
         .otherwise(None)
         .alias("forward_return")
     )
@@ -130,7 +135,12 @@ def _patched_backtester_run(
     data = _enrich_trading_constraints(data)
     raw_fwd = data["forward_return"] if "forward_return" in data.columns else None
     if bool(getattr(params, "limit_no_fill", True)):
-        if "forward_return" in data.columns and raw_fwd is not None:
+        if (
+            "forward_return" in data.columns
+            and "can_buy" in data.columns
+            and "can_sell" in data.columns
+            and raw_fwd is not None
+        ):
             data = data.with_columns(
                 pl.when(~pl.col("can_buy"))
                 .then(pl.lit(None))
@@ -302,5 +312,7 @@ def ensure_reproagent_compat() -> None:
         if "limit_no_fill" not in getattr(_rep.BacktestParams, "model_fields", {}):
             _rep.BacktestParams.model_config = ConfigDict(extra="allow")
             _rep.BacktestParams.model_rebuild(force=True)
-    except Exception:
-        pass
+    except Exception as _exc:
+        from finaince._swallow import log_swallowed
+
+        log_swallowed("finaince._reproagent_compat:ensure_reproagent_compat", _exc)
