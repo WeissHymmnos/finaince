@@ -581,12 +581,13 @@ def run_isolated(
     env = os.environ.copy()
     env["FINAINCE_ISOLATE"] = "1"
     mode = sandbox_mode()
-    use_bwrap = bwrap_available() and mode in {"auto", "bwrap"}
+    avail_bwrap = bwrap_available()
+    use_bwrap = avail_bwrap and mode in {"auto", "bwrap"}
     attempts: list[tuple[str, list[str]]] = []
     if use_bwrap:
         attempts.append(("bwrap", _bwrap_command()))
     attempts.append(("frozen_builtin", _child_command()))
-    last_error: str | None = None
+    last_error: str | None = "bwrap_unavailable" if (mode == "bwrap" and not avail_bwrap) else None
     deadline = time.monotonic() + max(0.1, float(timeout))
     for layer, argv in attempts:
         remaining = deadline - time.monotonic()
@@ -616,18 +617,18 @@ def run_isolated(
                 last_error = f"bwrap_layer_failed:{err[:200]}"
                 continue
             out = {"ok": False, "via": layer, "error": err}
-            if use_bwrap:
+            if use_bwrap or mode == "bwrap":
                 out["sandbox_fallback"] = True
-                out["sandbox_fallback_reason"] = last_error
+                out["sandbox_fallback_reason"] = last_error or "bwrap_unavailable"
             return _remember_isolate(out, name=name)
         try:
             parsed = json.loads(completed.stdout.strip().splitlines()[-1])
         except (json.JSONDecodeError, IndexError) as exc:
             parsed = {"ok": False, "error": f"isolate_bad_json: {exc}", "raw": completed.stdout[:400]}
         parsed["via"] = layer
-        if layer == "frozen_builtin" and use_bwrap:
+        if layer == "frozen_builtin" and (use_bwrap or mode == "bwrap"):
             parsed["sandbox_fallback"] = True
-            parsed["sandbox_fallback_reason"] = last_error
+            parsed["sandbox_fallback_reason"] = last_error or "bwrap_unavailable"
         return _remember_isolate(parsed, name=name)
     return {"ok": False, "skipped": True, "error": last_error or "isolate_unreachable"}
 
