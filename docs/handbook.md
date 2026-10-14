@@ -1,26 +1,25 @@
 # FinAlpha 产品手册
 
-安装包名是 `finaince`，产品名是 **FinAlpha**。这份手册对应公开仓库 [`WeissHymmnos/finaince`](https://github.com/WeissHymmnos/finaince) 的 `main`。
+本手册对应公开仓库 [`WeissHymmnos/finaince`](https://github.com/WeissHymmnos/finaince) 的 `main` 分支（Python 包名 `finaince`，产品名 **FinAlpha**）。文中所有界面截图均来自本机运行的 `finaince serve`（监听 `127.0.0.1:8000`，已配置 `FINAINCE_DESK_TOKEN`）。
 
-文中截图都是本机 `finaince serve`（监听 `127.0.0.1`，已填 desk token）对着真实 catalog 和 review 队列拍的。
-
-许可证：[AGPL-3.0](../LICENSE)。版权和第三方引擎见 [NOTICE](../NOTICE)。
+许可证：[AGPL-3.0](../LICENSE) · 版权与第三方组件声明：[NOTICE](../NOTICE)
 
 ---
 
-## 1. 这是什么
+## 1. 系统定位与工作流
 
-FinAlpha 管卖方研报里的选股因子。你在本机打开它，把候选收进 **catalog**，在本地行情上 **eval**，过了门禁再 **promote → review → pool**。研报本身用 `reproagent` 和 `finpdfpro` 抽公式、再回测。
+FinAlpha 用于在本地管理卖方研报复现与选股因子评测：
+1. **入库（Catalog）**：通过研究主循环（`loop._catalog_candidate`）或沙箱代码实现（`finaince impl` / `isolate.upsert_isolated`）将候选因子登记到本地 SQLite 目录；或通过 `finaince reproduce` 从券商 PDF 研报中抽取公式并回测入库。
+2. **评测（Eval / Bench）**：`finaince eval` 与 `finaince bench` 负责计算并输出因子指标（评测命令本身只读，不会自动往目录写记录）。各评测核是否可引用（`citable`）及目录写入规则见 [architecture.md](architecture.md) 或 `finaince doctor` 输出的 `evaluation_cores` 字段。
+3. **晋升与复核（Promote → Review → Pool）**：候选因子提交晋升后进入待审队列，必须通过默认拒止（fail-closed）的门禁检查与独立子进程对抗重评，才能进入正式因子池（Pool）。
 
-catalog 候选由 `loop._catalog_candidate` 和 `isolate.upsert_isolated` 写入。`finaince eval` 和 `finaince bench` 只打印指标，点时表不会自动进目录。哪台核可引用、谁写 catalog，见 [architecture.md](architecture.md)，或看 `finaince doctor` 的 `evaluation_cores.catalog_writers`。
-
-包装里带了两只股票的 `local_panel`，日期从 2023-01-03 到 2023-02-10，成本 0 bps，表达式是 `Rank(Delta(close, 1))`。`finaince baseline` 报的 IC、Sharpe 只对这几条数据负责。股票太少，够用来确认安装跑通。
+安装包内自带一份仅含两只股票的迷你行情面板 `local_panel`（`2023-01-03` 至 `2023-02-10`，交易成本 `0 bps`，测试公式 `Rank(Delta(close, 1))`）。`finaince baseline` 输出的 IC 与 Sharpe 仅用于确认本地安装与计算链路正常，不能当作实证研究结论引用。
 
 ---
 
-## 2. 安装（Python 3.12）
+## 2. 安装与环境准备（Python 3.12）
 
-克隆这一个公开仓库就够。复现和发现引擎从 GitHub 上钉死的 commit 安装，具体 SHA 写在 `pyproject.toml` 的 extras 里。
+克隆本仓库并使用 `uv` 安装即可。复现与挖掘引擎会自动从 `pyproject.toml` 中锁定的公开 GitHub commit 拉取：
 
 ```bash
 git clone https://github.com/WeissHymmnos/finaince.git
@@ -29,53 +28,56 @@ uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install -e ".[reproduction]"
 cp .env.example .env
-# 编辑 .env，至少写上：FINAINCE_DESK_TOKEN=你自己的口令
+# 编辑 .env，设置非空的 FINAINCE_DESK_TOKEN
 finaince doctor
 ```
 
-`doctor` 只有在 JSON 里 `"ok": true` 时才退出 0。装完后下面三行 import 都要成功：
+当 `finaince doctor` 返回的 JSON 中 `"ok": true` 时，进程退出码为 `0`。安装完成后，以下导入应能正常执行：
 
 ```python
 import finaince, reproagent
 from aiminer.manager import cull_alpha_pool
 ```
 
-可选 extras：
+### 可选依赖组（Extras）
 
-| extra | 用途 |
+| 依赖组 | 用途 |
 |---|---|
-| `.[reproduction]` | 复现、catalog、eval。公开安装先装这个 |
-| `.[discovery]` | aiminer 发现 |
-| `.[agent]` | Claude Agent SDK |
-| `.[dev]` | pytest |
-| `.[all]` | 上面全部 |
+| `.[reproduction]` | 研报复现、Catalog 管理与因子评测（标准安装必选） |
+| `.[discovery]` | `aiminer` 多智能体因子挖掘 |
+| `.[gbm]` | LightGBM 曲线择时模型头 |
+| `.[agent]` | Claude Agent SDK 研究台对话支持 |
+| `.[dev]` | `pytest`、`pytest-cov`、`ruff` 开发测试工具 |
+| `.[all]` | 一次性安装上述全部可选依赖 |
 
-完整工作台（Catalog、Review 那些页）需要一份编好的 `aiminer/frontend/dist`。wheel 里只有一张简单的 `finaince/web/index.html`。在作者本机，`finaince serve` 会先找旁边的 `aiminer/frontend/dist`。设 `FINAINCE_PACKAGED_SPA=1` 会只用那张简单页。
+### Web 前端说明
+
+Python 安装包内自带零构建依赖的三栏式轻量工作台（`finaince/web/index.html`）。若同级目录下存在编译好的 `aiminer/frontend/dist`，`finaince serve` 会优先挂载完整的 React 前端；设置 `FINAINCE_PACKAGED_SPA=1` 可强制使用内置轻量页。
 
 ---
 
-## 3. 十五分钟走通一遍
+## 3. 十五分钟完整操作示例
 
-下面每条都是真实 CLI。手册里的截图，就是在同一套 home 上跑完这条路径之后拍的。
+下面每一步均为真实可执行的 CLI 命令，手册中的工作台截图即在执行完同一套命令后截取。
 
-### 3.1 先看健康状况
+### 3.1 环境自检
 
 ```bash
 export FINAINCE_DATA_SOURCE=local
-export ALLOW_MOCK_LLM=true          # 离线复现用；已经接了聊天模型就不要设
+export ALLOW_MOCK_LLM=true          # 仅用于离线演示；已配置真实 LLM 时请勿开启
 export FINAINCE_DESK_TOKEN=desk-local
 finaince doctor
 ```
 
-正常时 `"ok"` 为 true，`"imports"` 里 `finaince`、`aiminer`、`reproagent` 都是 true，`qlib_child.via` 是 `qlib_child`。
+正常情况下输出 `"ok": true`，`"imports"` 下的 `finaince`、`aiminer`、`reproagent` 均为 `true`，且 `qlib_child.via` 显示为 `qlib_child`。
 
-### 3.2 跑一遍自带的 baseline
+### 3.2 运行安装探针基准
 
 ```bash
 finaince baseline
 ```
 
-数字跟打包 panel 绑定。连续跑两次，`ok` 和 IC、Sharpe 必须对得上。一次典型输出如下：
+该命令与内置 `local_panel` 强绑定，连续运行两次输出的 `ok`、IC 与 Sharpe 必须完全一致：
 
 ```json
 {
@@ -100,33 +102,33 @@ finaince baseline
 }
 ```
 
-### 3.3 同一条表达式走评测路由
+### 3.3 评测因子表达式
 
 ```bash
 finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
 finaince eval 'Rank($close)' --dialect qlib --backend local
 ```
 
-在 3.12 slim 安装上，`qlib` 走进程内的 `qlib_child`。如果你机器上的 `~/Documents/finance/data/samples/prices.parquet` 只有 `trade_date` / `ts_code` 两列，评测会改用打包的 `local_panel`。
+在 Python 3.12 环境下，`qlib` 方言默认通过进程内 `qlib_child` 执行。若本机外部样本文件字段不完整，评测器会自动回退使用随包分发的 `local_panel`。
 
-### 3.4 用隔离的 `compute(panel)` 写入 catalog
+### 3.4 在隔离沙箱中执行 `compute(panel)` 并入库
 
 ```bash
 finaince impl examples/15min/compute.py --name rank_delta --universe local_panel
 ```
 
-成功时 JSON 里会有 `catalog_id`（例如 `fac_iso_…`），表达式是 `Rank(Delta(close, 1))`。`daily_returns` 来自台上同一条 `evaluate` 路径，日期跟打包 panel 对齐。
+执行成功后，返回 JSON 中的 `catalog_id`（形如 `fac_iso_…`）即为新登记的目录记录，其 `daily_returns` 由同一条评测链路产出并与面板日期对齐。
 
-### 3.5 复现仓库里的 sample PDF
+### 3.5 复现示例 PDF 研报
 
 ```bash
 export FINAINCE_PDF_ROOT=/path/to/reproagent/tests/fixtures/sample_reports
 finaince reproduce "$FINAINCE_PDF_ROOT/minimal.pdf" --sync
 ```
 
-离线且开了 `ALLOW_MOCK_LLM=true` 时走 mock 抽取。写手册那天跑通的结果是 `"status": "passed"`，因子名 `mock_momentum`，公式 `close / Ref(close, 5) - 1`。没有 LLM 时，也可能停在 `review_enqueued`，并带上 `formula_proxy`。那是管道走完之后的诚实终态。
+离线开启 `ALLOW_MOCK_LLM=true` 时使用模拟抽取，输出 `"status": "passed"`（因子 `mock_momentum`，公式 `close / Ref(close, 5) - 1`）。未配置大模型且未开 mock 时，记录会进入 `review_enqueued` 并标记 `formula_proxy`，由后续门禁拦截。
 
-### 3.6 提交审核；股票太少时用 CLI 放行
+### 3.6 提交晋升与终端审批
 
 ```bash
 finaince catalog
@@ -135,57 +137,57 @@ finaince review
 finaince review --approve '<promotion_id>' --override thin_panel
 ```
 
-打包的 `local_panel` 只有两只股票，晋升时会打上 `thin_panel`。`review --approve` 默认跑对抗重评，只有 `--no-adversary` 能跳过。`--override thin_panel` 只跳过这一个具名门禁。这条安装示例来自引擎回测，`citable` 为 false，仍会因 `not_citable` 进不了 pool。HTTP `POST /api/v1/review/{id}/approve` 带 `override` 固定 403，也不能关掉对抗重评。
+由于内置 `local_panel` 只有两只股票，直接晋升会触发 `thin_panel`。`finaince review --approve` 默认启动子进程执行对抗重评（仅 `--no-adversary` 可跳过）；`--override thin_panel` 仅豁免股票数量门禁。因为该示例记录来自 `engine_native`（`citable=false`），不可豁免的 `not_citable` 门禁仍会阻止其进入正式因子池。而在 HTTP 接口 `POST /api/v1/review/{id}/approve` 中，任何携带 `override` 的请求固定返回 `403`，且无法关闭对抗重评。
 
-### 3.7 打开工作台
+### 3.7 启动本地工作台
 
 ```bash
 finaince serve --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000>。左侧 **API Token** 填 `.env` 里同一个 `FINAINCE_DESK_TOKEN`。空着不填的话，catalog 读接口会 401：
+浏览器访问 <http://127.0.0.1:8000>，在左侧 **API Token** 输入框填入 `.env` 中的 `FINAINCE_DESK_TOKEN`。未填 Token 时访问目录接口会返回 `401`：
 
 ![未填 token 时 Catalog 返回 401](handbook/images/12-catalog-no-token.png)
 
-如果要把服务绑到 `0.0.0.0`，还要同时设置 `FINAINCE_ALLOW_PUBLIC_BIND=1`。
+若需将服务绑定到 `0.0.0.0`，必须同时设置 `FINAINCE_ALLOW_PUBLIC_BIND=1`。
 
 ---
 
-## 4. 工作台怎么用
+## 4. Web 工作台界面导览
 
-左侧导航是 Catalog、Review、Reproduce、Agent、Swarm Runs、Alpha Pool、Manual Backtest、Strategy Backtest、Wiki、Operations。Token 存在浏览器的 `localStorage` 里，请求会同时带上 `Authorization: Bearer …` 和 `X-API-Key`。
+左侧导航栏包含 Catalog、Review、Reproduce、Agent、Swarm Runs、Alpha Pool、Manual Backtest、Strategy Backtest、Wiki 与 Operations。填入的 Token 保存在浏览器 `localStorage` 中，请求时自动注入 `Authorization: Bearer …` 与 `X-API-Key` 请求头。
 
-### 4.1 Catalog
+### 4.1 Catalog（因子目录）
 
-发现和复现共用这一张索引。手册环境里有两行：研报复现写进去的 `mock_momentum`（状态是 `review`），以及隔离 impl 写进去的 `rank_delta`（状态是 `candidate`）。
+因子挖掘、沙箱实现与研报复现共用同一张目录表。下图中展示了研报复现写入的 `mock_momentum`（状态 `review`）与沙箱实现写入的 `rank_delta`（状态 `candidate`）：
 
 ![Catalog 列表](handbook/images/01-catalog.png)
 
-点进一行，能看到表达式、universe、`thin_panel` 标记，还有「提交晋升」。HTTP 晋升只进入 review 队列，不会直接写入 pool。
+点击任意一行可查看因子表达式、股票池（universe）、门禁标记，并可点击提交晋升申请（HTTP 提交只进入待审队列，不会直接写进因子池）：
 
 ![Catalog 详情与晋升](handbook/images/02-catalog-detail.png)
 
-### 4.2 Review
+### 4.2 Review（晋升复核队列）
 
-这里列的是待审晋升。图里这一条方向是 `to_pool`、状态是 `pending`，门禁失败原因是 `thin_panel`。页面上的 **Approve** 不带 override，并且要等对抗重评通过才可点。股票不足 20 只时，终端可以用 `finaince review --approve … --override thin_panel` 跳过这一个门禁；对抗重评仍然会跑，除非加上 `--no-adversary`。不可引用的 `engine_native` 行还会被 `not_citable` 拦住。
+展示所有待审批的晋升请求。下图中该记录目标为 `to_pool`、状态为 `pending`，门禁拦截原因为 `thin_panel`。Web 界面上的 **Approve** 按钮不携带任何 override，且须等对抗重评通过后才允许点击：
 
 ![Review 队列因 thin_panel 拒批](handbook/images/03-review.png)
 
-### 4.3 Reproduce
+### 4.3 Reproduce（研报复现）
 
-走 HTTP 时，`pdf_path` 必须落在 `FINAINCE_PDF_ROOT` 下面，否则 403。命令行的 `finaince reproduce` 读的是本机文件路径，不受这条 HTTP 白名单约束。
+通过 HTTP 接口提交 PDF 复现任务时，`pdf_path` 必须位于环境变量 `FINAINCE_PDF_ROOT` 指定的目录树内，否则返回 `403`（命令行 `finaince reproduce` 直接读取本地路径，不受此白名单限制）：
 
 ![Reproduce](handbook/images/04-reproduce.png)
 
-### 4.4 Agent
+### 4.4 Agent（研究台对话）
 
-把自然语言交给 desk，让它去调 catalog、eval、reproduce、review。它不会自己编一套回测数字。要跑完整对话，需要安装 `.[agent]`，并且本机有 `claude` CLI。
+将自然语言指令路由至 Catalog、Eval、Reproduce 与 Review 工具链，所有指标均由底层确定性引擎产出，模型自身不编造回测数字。完整对话需安装 `.[agent]` 且本机具备 `claude` CLI：
 
 ![Agent](handbook/images/05-agent.png)
 
-### 4.5 Swarm、Pool、回测、Wiki、运维
+### 4.5 Swarm、Alpha Pool、回测、Wiki 与运维
 
-这几页来自同源挂上的 aiminer 工作台。Pool 里能看到 catalog 对偶写进去的 `mock_momentum` 和 `rank_delta`，IC 与 catalog 一致。Swarm、Manual、Strategy 要接上真实行情或 live 凭据，才有研究上的意义。
+以下页面挂载自同源的 `aiminer` 前端工作台，与 FinAlpha Catalog 共享数据库状态与鉴权口令：
 
 ![Swarm Runs](handbook/images/06-swarm-runs.png)
 
@@ -201,159 +203,122 @@ finaince serve --host 127.0.0.1 --port 8000
 
 ---
 
-## 5. 命令一览
+## 5. CLI 命令速查表
 
-```text
-finaince --help
-```
+可通过 `finaince --help` 查看全部子命令：
 
-| 命令 | 做什么 |
+| 命令 | 功能说明 |
 |---|---|
-| `doctor` | 检查家目录、import、panel、qlib child、LLM（`--audit-check` 重放审计哈希链；`--watch/--iterations/--interval` 常驻） |
-| `baseline` | 用自带的两只股票跑一遍固定窗口（`run_locked_baseline(cost_bps=…)` 支持含成本口径） |
-| `eval EXPR --dialect repro_polars\|qlib --backend local\|pit\|ricequant\|auto --cost-bps N` | `--backend pit` 与 `bench` 共用点时核，数字可引用。`--backend local` 是 `engine_native`，`citable` 为 false。`--start/--end` 锁窗；`--cost-bps` 传入成本 |
-| `validate EXPR` | 用 polars 引擎校验表达式 |
-| `impl PATH.py --name NAME --universe local_panel` | 隔离执行 `compute(panel)`，写入 catalog |
-| `reproduce PDF --sync [--start --end --source]` | 摄入研报并回测，可锁窗、选数据源 |
-| `catalog [--source SRC] [--rebuild] [--retag-synthetic]` | 列出 / 重建 catalog（rustminer 只读源） |
-| `library [-q QUERY] [--style STYLE]` | 先搜 catalog（可按 style 过滤），再搜引擎库 |
-| `promote ID --to to_pool --yes` | 提交审核 |
-| `review` / `--approve ID [--override thin_panel,weak_ic] [--no-adversary]` / `--reject ID` | 查看队列或退回。`approve` 默认跑对抗重评；只有 `--no-adversary` 跳过。`--override` 只跳过列出的具名门禁，跳不过 `unprovenanced` 和 `not_citable` |
-| `discover --demo` | 不调 LLM，做一轮 IC / 相关 cull |
-| `discover --swarm --sync/--async` | 启动 aiminer manager swarm（需要 LLM）；裸 `discover` 退出码 2 |
-| `serve --host 127.0.0.1 --port 8000` | 打开同源工作台 |
-| `jobs [--cancel ID]` | 作业列表 / 取消 |
-| `trace [--limit N]` | 研究事件链（每条带 hypothesis） |
-| `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 因子步与曲线择时交替。没有筛选产物、也没有 `--expression` 时返回 `expression_queue_empty`。曲线择时拟合一条组合收益曲线的滞后项，不是模型研发。`--workers N`（1–8）对队列做进程级并行预评估 |
-| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync] [--expression EXPR] [--neutralize-industry]` | 点时缓存上的双窗基准表，数字带 provenance。`--sync` 需米筐凭据。`--cost-sweep` 出成本敏感度；`--no-embargo` 关闭窗口末日剔除；`--neutralize-industry` 在没有 `industry` 列时跳过并声明，不把原始 IC 标成已中性化。缓存不在仓库里，本手册不引用某次本机跑数 |
-| `walkforward [--start --end --cost-bps --neutralize-vs]` | 逐年折叠稳健性：IC mean±std 与正折比例。输出带 provenance；本手册不引用某次本机读数 |
-| `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 筛选地图：模板×字段×窗口网格，复用 bench 的点时核；JSON 与 Markdown 落盘。筛选结果是探索，不是可引用结论 |
-| `wf-candidates [--top N --from-sweep PATH --rank-by --cost-bps --workers]` | 筛选候选逐年折叠：读最新（或指定）sweep 工件取 top-N，报告 rankIC、正折比例和净 Sharpe。探索性结果不是可引用结论 |
-| `wf-candidates [--per-family K --combine-top N --rebalance-every M]` | `--per-family` 每族限量；`--combine-top` 合成截面名次等权组合；`--rebalance-every` 每 M 日刷新持仓腿。数字留在命令输出的 provenance 里 |
-| `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | WS-K：研报语料批量治理内复现，manifest 断点续跑；`no_factors` 是诚实终态 |
-| `brain-submit EXPR [--catalog-id ID]` | WS-J：把治理流产出提交 BRAIN 外部裁决；无凭据时诚实降级为内部双窗基准 |
-| `agent PROMPT --max-turns N` | Claude Agent desk 一轮研究 |
-| `sdk-info` / `sdk-query --prompt` | SDK 会话信息 / 直查 |
+| `doctor` | 检查运行目录、模块导入、行情面板、Qlib 子进程与 LLM 配置（`--audit-check` 校验审计哈希链；`--watch/--iterations/--interval` 周期巡检） |
+| `baseline` | 在内置两只股票面板上运行固定窗口探针测试（Python 侧 `run_locked_baseline(cost_bps=…)` 支持传入交易成本） |
+| `eval EXPR --dialect repro_polars\|qlib --backend local\|pit\|ricequant\|auto --cost-bps N` | 因子表达式评测。`--backend pit` 与 `bench` 共用可引用的点时核（`pit_core`）；`--backend local` 走 `engine_native`（`citable=false`） |
+| `validate EXPR` | 使用 Polars 引擎校验因子表达式语法与算子合法性 |
+| `impl PATH.py --name NAME --universe local_panel` | 在隔离沙箱中执行 `compute(panel)` 并将结果登记至 Catalog |
+| `reproduce PDF --sync [--start --end --source]` | 解析券商 PDF 研报并执行回测验证，支持指定时间窗口与数据源 |
+| `catalog [--source SRC] [--rebuild] [--retag-synthetic]` | 查看或从上游记录重建本地因子目录 |
+| `library [-q QUERY] [--style STYLE]` | 跨本地 Catalog 与引擎因子库检索因子（支持按风格标签过滤） |
+| `promote ID --to to_pool --yes` | 将指定 Catalog 记录提交至晋升复核队列 |
+| `review` / `--approve ID [--override ...] [--no-adversary]` / `--reject ID` | 查看或审批复核队列。`approve` 默认运行子进程对抗重评；`--override` 仅能豁免指定的统计/样本门禁，无法豁免 `unprovenanced` 与 `not_citable` |
+| `discover --demo` | 不调用大模型，在本地演示一轮 IC 与相关性淘汰（cull） |
+| `discover --swarm --sync/--async` | 启动 `aiminer` 多智能体因子挖掘（需配置 LLM） |
+| `serve --host 127.0.0.1 --port 8000` | 启动同源 Web 工作台与 `/api/v1` 服务 |
+| `jobs [--cancel ID]` | 查看后台异步任务队列或终止指定任务进程树 |
+| `trace [--limit N]` | 查看带假设（hypothesis）与引用（cites）的研究事件审计链 |
+| `loop [--steps N] [--expression EXPR]... [--sync/--async] [--workers N]` | 交替执行因子评测步与 Walk-Forward 曲线择时步；未给 `--expression` 且无 sweep 产物时返回 `expression_queue_empty` |
+| `bench [--is-start --is-end --oos-start --oos-end --cost-bps] [--sync] [--expression EXPR] [--neutralize-industry]` | 在点时 CSI300 缓存上生成带溯源元数据的 IS/OOS 双窗基准表（`--sync` 需米筐凭证；`--cost-sweep` 输出成本敏感度；无 `industry` 列时诚实声明跳过行业中性化） |
+| `walkforward [--start --end --cost-bps --neutralize-vs]` | 种子因子逐年折叠稳健性检验，输出各年 IC 均值、标准差与正 IC 年份占比 |
+| `sweep [--top --workers --rank-by --windows --dedup-catalog]` | 在 `pit_core` 上并行扫描算子模板 $\times$ 字段 $\times$ 窗口网格，输出 JSON 与 Markdown 筛选报告 |
+| `wf-candidates [--top N --from-sweep PATH --rank-by --cost-bps --workers --per-family K --combine-top N --rebalance-every M]` | 读取筛选产物中的 Top-N 候选执行逐年折叠检验，支持按模板家族限额（`--per-family`）、截面名次合成（`--combine-top`）与低频调仓步长（`--rebalance-every`） |
+| `campaign --root DIR [--limit N] [--stats] [--reset-failed]` | 批量复现指定目录下的券商 PDF 研报，支持 `.manifest.json` 断点续跑与 `no_factors` 诚实记账 |
+| `brain-submit EXPR [--catalog-id ID]` | 将通过治理流的因子提交至 WorldQuant BRAIN 平台裁决；无凭据时自动降级为内部双窗基准 |
+| `agent PROMPT --max-turns N` | 通过 Claude Agent SDK 执行单轮研究台指令 |
+| `sdk-info` / `sdk-query --prompt` | 查看 SDK 工具链注册状态或发起直连查询 |
 
 ---
 
-## 6. 门禁
+## 6. 晋升门禁一览
 
-往 pool 里晋升时，下面这些会拦住：
+候选因子向因子池（`to_pool`）或因子库（`to_library`）晋升时，需通过以下门禁检查：
 
-| 门禁 | 何时触发 |
+| 门禁标识 | 触发拦截条件 | 是否允许 CLI `--override` |
+|---|---|:---:|
+| `unprovenanced` | 缺少评测核标识（`engine`）或缺少回测起止日期（`window_start` / `window_end`） | **否** |
+| `not_citable` | `citable=false`（包括所有 `engine_native` 与 `engine=unknown` 记录） | **否** |
+| `simulated` | 记录被标记为模拟合成数据 | 是 |
+| `formula_proxy` | 研报复现使用了占位代理公式而非真实抽取得出的表达式 | 是 |
+| `thin_panel` | 实际载入的行情面板股票数量少于 20 只（无论 `universe` 字段如何命名） | 是 |
+| `missing_ic` | IC 缺失或为非有限浮点数（`NaN` / `Inf`） | 是 |
+| `ic_threshold` | $|IC| \le 0.005$ | 是 |
+| `missing_returns` | 缺少每日多空收益序列（`daily_returns` 为空） | 是 |
+| `correlated` | 与目标池内已有因子的日收益序列相关系数 $> 0.7$ | 是 |
+| `empty_code` | 向 `to_pool` 晋升时无法映射出有效的算子代码 | 是 |
+| `weak_ic` | Harvey–Liu $t$ 统计量 $|ICIR| \times \sqrt{N_{\text{days}}} < 3.0$（观测日不足时标记 `insufficient_for_t_stat`） | 是 |
+| `inflated_sharpe` | Bailey–López de Prado 缩减夏普比率 $\text{DSR} < 0.95$（试验次数从审计链中的评测事件累计） | 是 |
+| `homogeneous` | 与种子库或 Catalog 已有因子的最大 AST 子树同构相似度 $> 0.85$ | 是 |
+| `overcomplex` | AST 符号节点数 $> 40$、自由参数 $> 6$ 或引用特征数 $> 8$ | 是 |
+| `corr_error:{exc}` | 相关性计算过程抛出异常，按默认拒止拦截 | 是 |
+
+所有通过 CLI `--override` 放行的门禁均会记入不可篡改的审计哈希链；HTTP 接口拒绝任何 `override`。
+
+---
+
+## 7. HTTP API 接口契约
+
+服务默认绑定 `127.0.0.1:8000`，CORS 默认仅放行本地 `8000` 与 `5173` 端口。鉴权支持 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。
+
+| 端点与方法 | 鉴权要求 | 行为说明 |
+|---|---|---|
+| `GET /`、`GET /api/v1/health`、`GET /api/v1/baseline` | 公开 | 返回工作台首页、服务健康状态与锁定探针基准结果 |
+| `GET /api/v1/catalog`、`/catalog/{id}`（支持 `?embed=memory`） | 需 Desk Token | 查询因子目录列表与单条详情 |
+| `GET /api/v1/review`、`/review/{id}/gates` | 需 Desk Token | 查询待审晋升队列与只读门禁检查报告 |
+| `GET /api/v1/jobs`、`/jobs/{id}`、`/audit`、`/trace`、`/bench` | 需 Desk Token | 查询异步作业、审计链、研究事件链与点时基准表 |
+| `POST /api/v1/eval`、`/promote`、`/impl`、`/impl/needs`、`/agent` | 需 Desk Token | 触发因子评测（透传 `cost_bps`）、提交晋升、沙箱执行与 Agent 对话 |
+| `POST /api/v1/loop` | 需 Desk Token | 支持传入 `expressions` 队列、`sync: false` 异步执行与 `workers: 1..8` 进程池并行 |
+| `POST /api/v1/jobs/{id}/cancel` | 需 Desk Token | 终止指定异步任务进程树（先发 `SIGTERM`，超时自动升级 `SIGKILL`） |
+| `POST /api/v1/review/{id}/adversary` | 需 Desk Token | 仅运行独立子进程重评并返回对比报告，不改变晋升状态 |
+| `POST /api/v1/review/{id}/approve` | 需 Desk Token | 强制执行对抗重评；请求体若包含 `override` 固定返回 **403**；若将 `adversary` 设为非 `true` 固定返回 **400** |
+| `POST /api/v1/review/{id}/reject` | 需 Desk Token | 驳回晋升请求 |
+| `POST /api/v1/reproduce` | 需 Desk Token | 触发 PDF 研报复现；若 `pdf_path` 不在 `FINAINCE_PDF_ROOT` 目录内固定返回 **403** |
+
+---
+
+## 8. 环境变量速查表
+
+可基于仓库根目录的 [`.env.example`](../.env.example) 创建 `.env`：
+
+| 环境变量 | 说明 |
 |---|---|
-| `unprovenanced` | 缺 `engine`，或缺 `window_start` / `window_end`。不能 override |
-| `not_citable` | `citable` 为 false（含 `engine_native` 与 `engine=unknown`）。不能 override，也不能单独作为晋升依据 |
-| `simulated` | 因子被判定为模拟指标 |
-| `formula_proxy` | 复现用了公式代理 |
-| `thin_panel` | 载入的 panel 股票数少于 20，和 universe 字符串无关 |
-| `missing_ic` | IC 缺失，或不是有限数字 |
-| `ic_threshold` | 有限 IC 的绝对值不超过 0.005 |
-| `missing_returns` | 没有日收益 |
-| `correlated` | 收益相关超过 0.7：to_pool 对照 pool 里已有因子；to_library 还会对照 catalog 里带日收益的 reproduction 行 |
-| `empty_code` | to_pool 时 qlib 表达式为空 |
-| `weak_ic` | Harvey-Liu t 统计量：\|ICIR\|·√n_days < 3.0（样本不足时跳过并记 `insufficient_for_t_stat`） |
-| `inflated_sharpe` | Deflated Sharpe < 0.95（Bailey–López de Prado；试验次数从 trace 的 eval/impl 事件数估计，少于 20 个观测跳过） |
-| `homogeneous` | WS-A 结构查重：与种子库/catalog 行的最大 AST 子树相似度 > 0.85（表达式解析失败时放行，由正则校验兜底） |
-| `overcomplex` | WS-A 复杂度上限：符号长度 > 40 或自由参数 > 6 或特征数 > 8（阈值先宽后紧） |
-| `corr_error:{exc}` | 相关性检查本身抛错，fail-closed |
-
-`weak_ic`、`inflated_sharpe`、`homogeneous`、`overcomplex` 和 `thin_panel` 一样可以用 CLI `--override` 放行，审计日志会记一笔。HTTP 拒绝一切 `override`。
-
-生成端正则化（WS-A）：候选入池前在 `cull_factor_pool` 做结构去重——近重复表达式（规范化后等价或相似度 > 0.85）直接淘汰并记 reason；catalog upsert 时写 `expr_hash` 列支持 O(1) 查重。sign-reflection（WS-C）：负 IC 且 \|t\|≥3 的候选生成镜像行一并评分。
-
----
-
-## 6.1 研究循环与对抗评审
-
-- `finaince loop` 让因子步和曲线择时交替。因子步按表达式队列逐条评测（`--expression` 可重复）；队列和筛选产物都空时直接 `expression_queue_empty`。曲线择时用 `FINAINCE_MODEL_HEAD=ols|gbm` 拟合一条组合收益曲线的滞后项（GBM 走 expanding-window，库缺失则跳过）。这不是截面模型研发。`--sync/--async` 决定是否走 JobRunner 子进程。
-- `FINAINCE_LOOP_ADVISOR=1` 时动作选择先问聊天 LLM（读最近 trace 历史 + 低相关样例 + 失败教训）；任何失败都回落启发式并记录 `advisor_error`。
-- SDK 工具 `research_context` 返回 CSS 式低相关样例与失败教训，playbook 要求提出新因子前先调它。
-- 晋升默认做对抗评审：`review --approve ID` 会在子进程里重跑同一条评测，比对 IC/Sharpe 容差。只有 `--no-adversary` 能跳过，HTTP 不能跳过。拒绝则 veto，行留在 review。
-
-## 6.2 超越型工作流（v3 计划落地件）
-
-- **WS-H 代码因子进化**（`code_evolution.py`）：LLM 写完整 `compute(panel)` → bwrap/冻结沙箱子进程执行 → shipped eval + 全门禁；失败按 error 前缀检索相似教训 + AST-diff 编辑动机改写下一稿。无 LLM 时停在 `llm_unavailable`，绝不假装迭代。
-- **动态组合**（`combination.py`）：只接受 `engine=pit_core` 且窗口一致的 ready 因子，按滚动逆波动率加权日收益（只用 t-1 前信息）。窗口不一致时结果是 `incompatible_windows`。这是收益序列加权，不是股票持仓优化。
-- **WS-L 过程记忆**（`process_memory.py`）：信用分配用「门禁+对抗存活」而非原始残差；AST-diff 编辑动机按错误类加权记忆注入 advisor prompt；经验链作为展示层（链尾扩展须 RankIC 超全链）。
-- **WS-F 工作台**：wheel 内 stub SPA 升级为三栏（Catalog / Review 队列含 gates 报告与对抗按钮 / Trace 时间线），纯静态零构建链。
+| `FINAINCE_DESK_TOKEN` | Web 工作台与 `/api/v1` 接口访问口令（同时同步至 `AIMINER_AUTH_TOKEN`） |
+| `FINAINCE_DATA_SOURCE` | 数据源模式（如 `local`） |
+| `FINAINCE_PANEL_PATH` | 指定完整行情 Parquet 文件路径（列结构与 `prices.parquet` 一致），替代内置两只股票探针面板 |
+| `FINAINCE_LOCAL_DATA_PATH` | 本地行情数据目录（供 `qlib_child` 读取） |
+| `FINAINCE_BT_START` / `FINAINCE_BT_END` | 覆盖默认回测起止日期 |
+| `FINAINCE_PDF_ROOT` | HTTP 接口 `/api/v1/reproduce` 允许读取的 PDF 根目录白名单 |
+| `FINAINCE_PACKAGED_SPA=1` | 强制使用包内自带的三栏式轻量首页，忽略同级 `aiminer/frontend/dist` |
+| `FINAINCE_ALLOW_PUBLIC_BIND=1` | 允许 `finaince serve` 绑定非回环地址（如 `0.0.0.0`） |
+| `FINAINCE_PATH_HACK=1` | 开发调试模式下允许注入同级本地兄弟仓库源码 |
+| `FINAINCE_NO_PATH_HACK=1` | CI 与洁净环境安装测试时强制禁用本地路径注入 |
+| `ALLOW_MOCK_LLM=true` | 离线测试时启用模拟公式抽取 |
+| `RQ_TOKEN` 或 `RQ_USER` + `RQ_PASS` | 米筐（RiceQuant）行情凭证，供 `finaince bench --sync` 使用 |
+| `BRAIN_USER` / `BRAIN_PASS` | WorldQuant BRAIN 平台凭证；未配置时自动降级为内部双窗基准 |
+| `FINAINCE_LLM_PROVIDER` / `FINAINCE_LLM_MODEL` / `FINAINCE_LLM_API_KEY` / `FINAINCE_LLM_BASE_URL` | 对话与代码进化所用的大模型接口配置 |
+| `FINAINCE_LOOP_ADVISOR=1` | 在 `finaince loop` 中启用大模型动作建议（失败时自动回退至启发式规则） |
+| `FINAINCE_MODEL_HEAD=ols\|gbm` | 选择研究循环中的 Walk-Forward 曲线择时模型头（`gbm` 需安装 `.[gbm]`） |
+| `FINAINCE_PANEL_CACHE=off` | 关闭进程级本地面板内存缓存（默认开启） |
+| `FINAINCE_MAX_JOBS=N` | 后台异步作业最大并发槽位数（默认 `2`，超出返回 `max_jobs_reached`） |
+| `FINAINCE_SANDBOX=bwrap\|auto\|off` | 沙箱隔离策略：`auto` 在检测到 `bwrap` 时自动启用无网络容器隔离 |
+| `FINAINCE_QLIB_SUBPROCESS=1` | 将 Qlib 评测委托给独立 Python 3.10 子进程（配合 `AIMINER_PYTHON`） |
+| `FINAINCE_CATALOG=0` | 关闭引擎回测至 Catalog 的自动双写钩子 |
+| `FINAINCE_CATALOG_MEMORY=1` | 查询 `/api/v1/catalog/{id}` 时默认内嵌过程记忆摘要 |
 
 ---
 
-## 7. HTTP 接口
+## 9. 自动化测试
 
-默认听在 `127.0.0.1:8000`。CORS 默认只放行 localhost 的 8000 和 5173。
-
-| 路径 | 鉴权 |
-|---|---|
-| `GET /`、`GET /api/v1/health`、`GET /api/v1/baseline` | 公开 |
-| `GET /api/v1/catalog`、`/catalog/{id}`（可带 `?embed=memory`）、`/review`、`/jobs`、`/jobs/{id}`、`/audit`、`/trace` | 需要 desk token |
-| `GET /api/v1/review/{id}/gates` | 只读门禁报告（不改状态），需要 desk token |
-| `GET /api/v1/bench` | WS-D 双窗基准表（JSON，含 provenance 与 Markdown），需要 desk token |
-| `POST` promote / eval / approve / reject / adversary / reproduce / impl / impl/needs / agent / loop | 需要 desk token |
-| `POST /api/v1/jobs/{id}/cancel` | 需要 desk token |
-| `POST /api/v1/review/{id}/approve` | 默认跑对抗重评。没有跳过开关。拒绝时返回 `adversary_rejected`，行留在 review |
-| `POST /api/v1/review/{id}/approve` 且 body 带 `{"override":[…]}` | **403** |
-| `POST /api/v1/review/{id}/approve` 且 body 把 `adversary` 设成 true 以外的值 | **400**。`true` 只是重复默认行为，不能用来关闭 |
-| `POST /api/v1/review/{id}/adversary` | 只出 fresh-context 重评报告，不做决定 |
-| `POST /api/v1/loop` body 可带 `{"expressions":[…]}`、`{"sync":false}` 与 `{"workers":1..8}` | 批量表达式队列 + 异步 job + 批内并行（worker 级失败按单表达式诚实落败） |
-| `POST /api/v1/reproduce` 且 PDF 不在 `FINAINCE_PDF_ROOT` 下 | **403** |
-
-Token 放在 `Authorization: Bearer <token>` 或 `X-API-Key: <token>`。`FINAINCE_DESK_TOKEN` 会同步到 `AIMINER_AUTH_TOKEN`，aiminer 的 `/api/*` 写操作同样要带这个口令。
-
----
-
-## 8. 环境变量
-
-先复制 [`.env.example`](../.env.example)。常用项如下：
-
-| 变量 | 作用 |
-|---|---|
-| `FINAINCE_DESK_TOKEN` | 工作台和写操作 HTTP |
-| `FINAINCE_DATA_SOURCE=local` | 走本地 panel |
-| `FINAINCE_PDF_ROOT` | HTTP 复现允许的目录 |
-| `FINAINCE_PACKAGED_SPA=1` | 只用 wheel 里那张简单首页 |
-| `FINAINCE_ALLOW_PUBLIC_BIND=1` | 允许绑定 `0.0.0.0` |
-| `FINAINCE_PATH_HACK=1` | 使用作者树旁边的源码 |
-| `FINAINCE_NO_PATH_HACK=1` | CI 和陌生人安装时关掉旁路 |
-| `ALLOW_MOCK_LLM=true` | 离线 mock 抽取 |
-| `RQ_TOKEN` / `RQ_USER`+`RQ_PASS` | 米筐，可选 |
-| `FINAINCE_LLM_PROVIDER` / `FINAINCE_LLM_MODEL` / `FINAINCE_LLM_API_KEY` / `FINAINCE_LLM_BASE_URL` | 聊天模型，可选。不默认任何厂商 |
-| `FINAINCE_LIVE_AGENT=1` | 打开 live Claude 测试 |
-| `FINAINCE_PANEL_PATH` | 指向完整行情 parquet（列结构与自带 prices.parquet 一致），替换 smoke 面板 |
-| `FINAINCE_BT_START` / `FINAINCE_BT_END` | 覆盖默认回测窗 |
-| `FINAINCE_LOCAL_DATA_PATH` | 本地数据目录（qlib child 也读） |
-| `FINAINCE_CATALOG=0` | 关掉引擎→catalog 双写 hook |
-| `FINAINCE_CATALOG_MEMORY=1` | catalog 详情默认 embed memory 摘要 |
-| `FINAINCE_LOOP_ADVISOR=1` | loop 动作选择先问聊天 LLM，失败回落启发式 |
-| `FINAINCE_MODEL_HEAD=ols\|gbm` | 曲线择时用的滞后拟合；gbm 需装 `.[gbm]`。不是模型研发 |
-| `FINAINCE_PANEL_CACHE=off` | 关掉 WS-C 进程级 panel 缓存（默认开，仅 local 后端） |
-| `FINAINCE_MAX_JOBS=N` | 异步子进程并发上限（默认 2，超限返回 `max_jobs_reached`） |
-| `FINAINCE_SANDBOX=bwrap\|auto\|off` | WS-E 沙箱层：auto 检测到 bwrap 即用；失败自动回落冻结内建并标注 `sandbox_fallback` |
-| `BRAIN_USER` / `BRAIN_PASS` | WS-J BRAIN 外部裁决凭据；缺失时降级为内部双窗基准并在输出声明 |
-| `FINAINCE_QLIB_SUBPROCESS=1` | qlib 评测走 3.10 子进程（配 `AIMINER_PYTHON`） |
-| `FINAINCE_QLIB_BACKEND` / `FINAINCE_QLIB_TIMEOUT` | 子进程 qlib 的数据后端与超时 |
-| `AIMINER_PYTHON` | 3.10 conda 解释器路径（swarm / qlib 子进程） |
-| `AIMINER_INCLUDE_SPA=1` | 允许挂 aiminer 前端 dist |
-| `FINAINCE_JOB_ID` | 异步子进程回写同一 job 行（内部使用） |
-
----
-
-## 9. 测试
+运行全量离线单元测试（无需网络或外部凭证）：
 
 ```bash
 python -m pytest tests --ignore=tests/test_live_real.py
 ```
 
-GitHub Actions 跑两份：`packaging-312`（公开 extras，并设置 `FINAINCE_NO_PATH_HACK=1`）和 `pytest-offline`。米筐、券商 PDF、Claude 属于 `pytest -m live`，没有凭据就不用跑。
-
----
-
-## 10. 能做什么，还要另备什么
-
-clone 下来之后，本机就能跑 catalog、eval、CLI review，复现仓库里的 sample PDF，以及 3.12 上的 qlib child。
-
-要拿它评真正的因子，还得自己准备：编好的前端 dist、至少 20 只股票的行情，米筐或本地数据都行。要从券商 PDF 里抽公式、跑 swarm，还需要 LLM。
-
-如果把 `baseline` 的 IC / Sharpe 写进对外材料，请一并带上 JSON 里 `claim` 那一句，说明数据来自自带的两只股票、成本 0 bps。
+GitHub Actions 在每次提交时运行 `packaging-312`（设置 `FINAINCE_NO_PATH_HACK=1` 验证洁净公开安装）与 `pytest-offline`。涉及米筐、真实券商 PDF 与在线大模型的集成测试归入 `pytest -m live`，仅在配置好相应凭证时按需运行。

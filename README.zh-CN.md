@@ -2,31 +2,26 @@
 
 [English](README.md) · **中文**
 
-FinAlpha 是一个专门用于管理卖方研报中选股因子的专业工具。它提供了一套完整的工作流程：将收集到的选股因子录入到因子目录（catalog）中，然后在本地数据面板（panel）上进行系统性的评测和验证。只有通过门禁检测的因子才能获得晋升，进入下一阶段。同时，对于卖方研报的复现，系统集成了 `reproagent` 和 `finpdfpro` 两个工具，可以准确还原研报中的版面布局和数学公式。
+FinAlpha（Python 包名 `finaince`）是一个面向 A 股选股因子研究与卖方研报复现的本地工作台。它把候选因子纳入本地 SQLite 目录（Catalog）统一管理，在明确区分数据溯源的评测核上计算指标，通过默认拒止（fail-closed）的门禁与独立子进程对抗重评控制因子入池，并结合 `reproagent` 与 `finpdfpro` 从券商 PDF 研报中抽取公式与回测结果。
 
-> **注意**：Python 安装包的名称是 `finaince`（历史原因），但产品的正式名称是 **FinAlpha**。在安装和导入时请使用包名 `finaince`，但在文档和讨论中我们统一称呼其为 FinAlpha。
-
-**[完整的产品手册](docs/handbook.md)** 包含了详细的使用教程、所有命令的完整说明、HTTP API 接口约定以及系统工作台的界面截图，推荐新用户先阅读手册以全面了解系统功能。
+- **[产品手册](docs/handbook.md)** — 完整命令行教程、工作台界面截图、HTTP 接口契约与环境变量字典。
+- **[架构与评测核说明](docs/architecture.md)** — 三台评测核的边界、目录写入规则与可引用数据的判定标准。
 
 ![填好 desk token 后的 Catalog 界面](docs/handbook/images/01-catalog.png)
 
-作为安装验证的基准测试，`finaince baseline` 命令会在系统自带的测试数据集（包含两只股票的 `local_panel`）上运行一个预设的因子表达式 `Rank(Delta(close, 1))`。整个测试过程的交易成本设定为 0 bps（基点）。测试输出的各项指标数值仅用于验证系统安装是否成功，不具备实际投资参考价值。
+---
 
-## 许可证与版权
+## 核心设计原则
 
-本项目采用 [GNU Affero General Public License v3.0](LICENSE) 许可证发布。这是一个强 copyleft 许可证，要求所有基于本项目的修改和分发必须以相同许可证的形式公开源代码。
-
-版权信息和第三方引擎的使用声明，请参阅 [NOTICE](NOTICE) 文件。
+1. **门禁默认拒止（Fail-Closed）**：候选因子向因子池（Pool）或因子库（Library）晋升时，只要触发样本股票不足 20 只（`thin_panel`）、使用公式占位代理（`formula_proxy`）、评测核不可引用（`not_citable`）、多重检验显著性不足（`weak_ic`、`inflated_sharpe`）或 AST 结构同质化/过复杂（`homogeneous`、`overcomplex`），晋升即被拦截。
+2. **审批强制对抗重评（Adversarial Re-evaluation）**：执行 `approve` 时，系统默认拉起全新子进程独立重跑评测，核验 IC 与 Sharpe 是否在容差内一致。HTTP 接口严禁跳过对抗重评，也不接受任何 `override` 绕过参数。
+3. **严格区分安装探针与实证数据**：仓库内置的两只股票面板 `local_panel`（2023-01-03 至 2023-02-10，0 bps 成本）仅用于验证本地安装与算子链路完好（`finaince baseline`）。真实因子评测需使用点时（Point-in-Time）CSI300 缓存（`finaince bench`）或通过 `FINAINCE_PANEL_PATH` / 米筐（RiceQuant）接入完整行情。
 
 ---
 
-## 公开安装（要求 Python 3.12）
+## 安装指南（Python 3.12）
 
-FinAlpha 是一个完全开源的项目，您只需要克隆这个公开仓库即可完成所有依赖的安装。系统的核心引擎会从 GitHub 上的固定 commit 版本进行安装，所有依赖配置都在 `pyproject.toml` 文件的 extras 部分中定义。
-
-> **安全提示**：默认情况下，系统不会从开发者的本地机器注入任何额外的源码。如果您需要在开发环境中使用本地源码（例如调试或修改代码），可以设置环境变量 `FINAINCE_PATH_HACK=1` 来启用这一功能，但请谨慎使用，确保您理解这可能带来的安全风险。
-
-### 安装步骤
+直接克隆本仓库并通过 `uv` 安装。复现与挖掘引擎均按 `pyproject.toml` 中锁定的公开 GitHub commit 自动拉取，不依赖作者本机目录。
 
 ```bash
 git clone https://github.com/WeissHymmnos/finaince.git
@@ -34,245 +29,118 @@ cd finaince
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install -e ".[reproduction]"
-cp .env.example .env   # 先配置 FINAINCE_DESK_TOKEN，再运行 finaince serve
+cp .env.example .env   # 启动服务前请在 .env 中配置 FINAINCE_DESK_TOKEN
 finaince doctor
 ```
 
-### 安装验证
+`finaince doctor` 会依次检查 Python 依赖导入（`finaince`、`reproagent`、`aiminer`）、数据库路径、内置行情面板与 Qlib 子进程，全部通过时 JSON 中的 `ok` 为 `true` 且退出码为 `0`。
 
-运行 `finaince doctor` 命令可以检查系统是否安装正确。该命令只有在 JSON 响应的 `ok` 字段为 `true` 时才会返回退出码 0，表示所有检查都已通过。
+可选依赖组（extras）：
+- `.[discovery]`：`aiminer` 多智能体因子挖掘
+- `.[gbm]`：LightGBM 曲线择时模型头
+- `.[agent]`：Claude Agent SDK 研究台对话集成
+- `.[dev]`：`pytest`、`pytest-cov`、`ruff`
+- `.[all]`：安装上述全部扩展
 
-安装完成后，请确保以下 Python 导入语句都能成功执行：
-- `import finaince`
-- `import reproagent`
-- `from aiminer.manager import cull_alpha_pool`
-
-### 环境变量配置
-
-系统依赖以下环境变量来正常运行：
-
-| 环境变量 | 用途 | 说明 |
-|---|---|---|
-| `FINAINCE_DESK_TOKEN` | API 认证 | 读取 catalog、review 以及所有 HTTP 写操作都需要此 token |
-| `FINAINCE_ALLOW_PUBLIC_BIND` | 服务绑定 | 设置为 `1` 可以将服务绑定到 `0.0.0.0`，默认仅绑定 `127.0.0.1:8000` |
-| `FINAINCE_PACKAGED_SPA` | 前端配置 | 设置为 `1` 时，即使存在编译好的 `aiminer/frontend/dist`，也只使用简单首页 |
-| `FINAINCE_PATH_HACK` | 开发模式 | 设置为 `1` 时会注入开发者机器上的本地源码 |
-
-### 可选的依赖包
-
-根据您的具体需求，可以选择性地安装以下 extras 包：
-
-- `.[agent]`：集成 Claude Agent SDK，用于智能代理功能
-- `.[dev]`：包含 pytest 等测试工具，用于本地开发和测试
-- `.[all]`：安装所有可选的依赖包
-
-### 前端说明
-
-wheel 包中默认只包含一张简单的首页（`finaince/web/index.html`）。如果您需要完整的 Catalog 和 Review 管理界面，需要使用编译好的 `aiminer/frontend/dist` 前端资源。当检测到旁边存在 dist 目录时，系统会自动使用完整的前端界面。如果您希望在存在 dist 的情况下仍然使用简单页面，可以设置 `FINAINCE_PACKAGED_SPA=1`。
+`finaince serve` 默认仅监听 `127.0.0.1:8000`；除 `/api/v1/health` 与 `/api/v1/baseline` 外，所有 `/api/v1` 读写接口均需携带 `FINAINCE_DESK_TOKEN`。如需监听 `0.0.0.0`，必须显式设置 `FINAINCE_ALLOW_PUBLIC_BIND=1`。安装包内置了零构建依赖的三栏式轻量工作台（`finaince/web/index.html`）；若同级目录存在编译好的 `aiminer/frontend/dist`，服务会自动挂载完整前端（可通过 `FINAINCE_PACKAGED_SPA=1` 强制使用内置页）。
 
 ---
 
-## 十五分钟快速上手
+## 十五分钟快速走通
 
-本节将引导您使用仓库自带的示例数据完成一套完整的因子管理流程。整个示例基于系统内置的测试数据集 `local_panel`（包含两只股票），可以让您在短时间内了解 FinAlpha 的核心功能。
+以下命令全部基于包内自带的 `local_panel`（两只股票）运行，图文对照见 [docs/handbook.md](docs/handbook.md)：
 
-> **注意**：以下每一条都是真实可用的 CLI 命令。[产品手册](docs/handbook.md)中沿用这条路径提供了详细的操作截图和步骤说明，建议结合手册一起学习。
-
-### 步骤 1：系统检查
 ```bash
+# 1. 环境自检与安装探针基准
 finaince doctor
-```
-验证系统环境和依赖是否正确配置。
-
-### 步骤 2：运行基准测试
-```bash
 finaince baseline
-```
-运行基准测试，验证系统的核心计算功能是否正常。
 
-### 步骤 3：因子表达式评测
-```bash
-# 使用 repro_polars 方言
+# 2. 评测因子表达式（支持 repro_polars 与 qlib 两种方言）
 finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
-
-# 使用 qlib 方言
 finaince eval 'Rank($close)' --dialect qlib --backend local
-```
-在本地后端上对指定的因子表达式进行评测，支持多种方言。
 
-### 步骤 4：实现自定义因子
-```bash
+# 3. 在沙箱中运行自定义 Python 因子并写入 Catalog
 finaince impl examples/15min/compute.py --name rank_delta --universe local_panel
-```
-将示例代码中的因子实现（`examples/15min/compute.py`）注册到系统中，指定因子名称和适用的股票范围（`local_panel`）。
 
-### 步骤 5：提升因子等级
-```bash
+# 4. 提交晋升申请并查看待审队列
 finaince promote '<catalog_id>' --to to_pool --yes
-```
-将指定的因子从目录中提升到因子池（pool），`--yes` 参数表示跳过交互式确认。
-
-### 步骤 6：审查因子
-```bash
 finaince review
-```
-进入因子审查界面，查看待审核的因子列表。
 
-### 步骤 7：批准因子加入池
-```bash
+# 5. 审批晋升（默认触发子进程对抗重评）
 finaince review --approve '<promotion_id>' --override thin_panel
-```
-`approve` 默认跑对抗重评，只有 `--no-adversary` 能跳过。`--override thin_panel` 只跳过股票数量这一个门禁。两只股票的引擎回测行 `citable` 为 false，仍会因 `not_citable` 进不了池。
 
-### 步骤 8：启动服务
-```bash
+# 6. 启动本地 Web 工作台
 finaince serve --host 127.0.0.1 --port 8000
 ```
-启动 FinAlpha 的 Web 服务，默认在本地 8000 端口监听。
 
-### 重要说明
-
-> **HTTP API 限制**：`POST /api/v1/review/{id}/approve` 默认跑对抗重评，不能关闭。请求体里的 `{"override":[...]}` 固定返回 403。`adversary` 若不是 `true`，返回 400。CLI 的 `--override thin_panel` 只跳过这一个具名门禁，不把不可引用的行放进池。
-
-> **晋升失败的常见原因**：
-> - 股票数量过少（少于 20 只）：系统会因 `thin_panel` 检测而暂停晋升流程
-> - 使用了公式代理：系统检测到因子实现使用了代理公式时会拒绝晋升
-> - 缺少关键指标：如果因子缺少 IC（信息系数）或收益数据，晋升会停留在待审状态或直接失败
+关于第 5 步的说明：`--override thin_panel` 仅豁免“股票数不少于 20 只”这一项门禁，便于在烟雾测试面板上走通命令流；但由于两只股票的 `engine_native` 回测结果标记为 `citable=False`，不可豁免的 `not_citable` 门禁仍会阻止该测试记录进入正式因子池。
 
 ---
 
-## Baseline 基准测试
+## 评测核与数据口径
 
-`finaince baseline` 命令（以及对应的 Python 函数 `run_locked_baseline()`）用于运行系统的基准测试。该测试使用一个固定的配置，确保在不同环境下都能获得一致的结果，从而验证系统的计算准确性和稳定性。
+FinAlpha 区分三台评测核（`pit_core`、`engine_native`、`qlib`），详见 [docs/architecture.md](docs/architecture.md)。
 
-### 测试配置
+### 1. 安装探针基准（`finaince baseline`）
 
-| 配置项 | 值 | 说明 |
-|---|---|---|
-| 测试窗口 | 2023-01-03 至 2023-02-10 | 固定的历史数据区间 |
-| 股票范围（universe） | `local_panel` | 系统自带的包含两只股票的测试数据集 |
-| 交易成本 | 0 bps | 无交易成本设定 |
-| 因子表达式 | `Rank(Delta(close, 1))` | 基于收盘价变化的排序因子 |
-| 方言 | `repro_polars` | 使用 Polars 作为后端计算引擎 |
+`finaince baseline`（对应 `run_locked_baseline()`）锁死在内置的两只股票面板上，仅用于确认计算结果确定可复现：
 
-### 结果验证
+| 参数 | 设定值 |
+|---|---|
+| 时间窗口 | `2023-01-03` → `2023-02-10` |
+| 股票池 | `local_panel`（2 只股票，56 行） |
+| 交易成本 | `0 bps` |
+| 因子表达式 | `Rank(Delta(close, 1))` |
+| 方言 | `repro_polars` |
 
-基准测试的一个重要特性是**可重复性**。连续运行两次时，输出的 `ok` 状态以及 IC / Sharpe 比率等关键指标必须完全一致。这验证了系统计算的稳定性和确定性。
+连续运行两次 `finaince baseline`，输出的 `ok` 状态、IC 与 Sharpe 必须完全一致。对外引用任何数字时，必须注明其来自 `local_panel`（0 bps）还是真实历史股票池。
 
-> **数据来源声明**：在对外发布或分享任何基于 FinAlpha 的数据时，请务必明确注明：数据来自系统内置的 `local_panel` 测试数据集，且交易成本为 0 bps。这可以避免他人误解数据的真实来源和计算条件。
+### 2. 点时 CSI300 实证轨（`finaince bench` 与 `--backend pit`）
 
-> **股票数量限制**：当股票数量少于 20 只时，因子晋升流程会因为触发 `thin_panel`（稀疏面板）检测而自动暂停。这是系统的安全机制，用于防止在数据量不足的情况下得出可能不准确的结论。
+要在真实股票池上做可引用的截面评测：
+- 配置米筐凭证（`RQ_USER` / `RQ_PASS` 或 `RQ_TOKEN`），执行 `finaince bench --sync` 拉取点时 CSI300 历史缓存（按年存储 Parquet 并校验 `sha256`，按每年 6 月/12 月第二个周五切换成分股，采用后复权价格，自动过滤次日停牌与一字涨跌停不可交易标的）。
+- 或将 `FINAINCE_PANEL_PATH` 指向符合 `prices.parquet` 列结构（`trade_date`、`ts_code`、`open`、`high`、`low`、`close`、`volume`、`amount`）的本地 Parquet 行情文件。
 
-## 真宇宙数字 (Comparable numbers)
-
-要在完整的股票池上进行评测，而不是使用系统自带的测试数据集，请将环境变量 `FINAINCE_PANEL_PATH` 指向一个符合 `prices.parquet` 格式（包含 `trade_date`、`ts_code`、`close` 等列）的 Parquet 文件。或者，配置 RiceQuant 凭证（`RQ_USER` 和 `RQ_PASS`）以解锁 `data_backend=ricequant`。所有晋升的因子指标都应明确标注交易成本（如 `cost_bps`）、股票池范围和回测窗口，以确保数据的可比性。
-
-`finaince bench` 的点时表（默认 IS 2019–2023 / OOS 2024，双边 5 bps）是 `pit_core`，不进 catalog。`finaince eval` 和 `finaince bench` 只打印指标。catalog 候选由 `loop._catalog_candidate` 和 `isolate.upsert_isolated` 写入。`finaince doctor` 在 `evaluation_cores.catalog_writers` 列出这两个名字，三台核的 `writes_catalog` 都是 false。说明见 [docs/architecture.md](docs/architecture.md)。行情缓存不在仓库里；`docs/CHANGELOG.md` 里的某次本机跑数不是公开引用表。
+`finaince bench` 与 `finaince eval --backend pit` 共用同一套 Polars 向量化点时核（`engine=pit_core`），默认切分 IS（2019–2023）与 OOS（2024）双窗口，按五分位多空组合换手率扣除双边成本并剔除窗口末日防止跨窗泄露。
 
 ---
 
-## 功能特性
+## 功能概览
 
-FinAlpha 提供了一套完整的因子管理和研报复现解决方案，具有以下核心功能特性：
+- **卖方研报复现与批量战役（`reproduce` / `campaign`）**：调用 `finpdfpro` 解析研报版面与公式，经 `reproagent` 回测验证；支持对整个研报目录发起断点续跑的批量复现战役，对不含可测因子的研报诚实记为 `no_factors`。
+- **多重检验与结构去重门禁（`review/gates.py`）**：除数据溯源与样本量检查外，内置 Harvey–Liu $t$ 检验（$|t| \ge 3.0$）、Bailey–López de Prado 缩减夏普比率（DSR $\ge 0.95$）、AST 规范化哈希查重（`expr_hash`）与子树相似度门禁（`homogeneous`）、公式复杂度上限（`overcomplex`）以及显著负 IC 因子的符号镜像反转。
+- **算子模板网格筛选与逐年折叠（`sweep` / `wf-candidates`）**：在 `pit_core` 上并行扫描算子模板 $\times$ 字段 $\times$ 窗口网格，支持按家族配额提取 Top 候选并做逐年 Walk-Forward 稳健性检验与截面名次合成。
+- **AST 白名单与 `bwrap` 沙箱代码进化（`isolate.py` / `code_evolution.py`）**：对自定义 `compute(panel)` 代码先做静态 AST 白名单审查，再通过无网络的 `bwrap --unshare-all`（或冻结内建命名空间）隔离执行；失败时按错误前缀检索历史教训辅助改写。
+- **无前瞻动态因子组合（`combination.py`）**：对已入池的 `pit_core` 因子日收益序列按严格因果（仅用 $t-1$ 及之前信息）的滚动逆波动率加权，并按每日权重 L1 换手扣除双边交易成本。
+- **研究循环与过程记忆（`loop.py` / `process_memory.py`）**：因子步与 Walk-Forward 曲线择时头（`FINAINCE_MODEL_HEAD=ols|gbm`）交替运行；只有同时通过门禁与对抗重评的候选，其 AST 编辑动机才会被计入过程记忆正向信用。
 
-### 全流程因子管理
-- **目录管理（catalog）**：将选股因子统一收录到可搜索、可分类的目录中，方便后续检索和管理
-- **系统评测（eval）**：在本地数据面板上对因子进行历史回测和性能评估
-- **门禁检测**：对因子进行一系列的质量检查，确保其满足基本的标准
-- **晋升审核**：通过审核的因子可以晋升到更高的等级，进入因子池供后续使用
-
-### 研报复现
-- 使用 `reproagent` 工具复现卖方研报中的研究内容
-- 使用 `finpdfpro` 工具准确还原研报的版面布局
-- 支持研报中数学公式的解析和计算
-- 实现研报结果的可验证性和可重现性
-
-### 灵活的测试环境
-- **内置测试数据**：系统自带 `local_panel`，包含精心挑选的两只股票，用于快速验证和演示
-- **零交易成本**：测试环境中的交易成本设定为 0 bps，排除了交易成本对因子评测的影响
-- **固定窗口测试**：使用固定的历史数据窗口，确保测试结果的可重复性
-
-### 多方言支持
-- 支持 `repro_polars` 方言：基于 Polars 的高效计算引擎
-- 支持 `qlib` 方言：与 Qlib 框架的深度集成
-- 在 Python 3.12 slim 环境中，通过进程内 local child 方式运行 `qlib` 方言，实现了轻量级的环境部署
-
-### 研究环与晋升纪律
-- **成本感知评测**：`cost_bps` 净值口径（换手来自回测明细），基准支持含成本双跑
-- **多重检验门禁**：`weak_ic`（Harvey-Liu t ≥ 3）与 `inflated_sharpe`（Deflated Sharpe），搜索幸存者偏差不再混进晋升
-- **生成端正则化**：AST 结构查重门禁 `homogeneous` 与复杂度上限 `overcomplex`；候选入池前近重复直接淘汰；catalog 带 `expr_hash` O(1) 查重
-- **吞吐优化**：进程级本地 panel 缓存、在途作业查重守卫、`FINAINCE_MAX_JOBS` 并发上限、显著负 IC 因子的符号镜像
-- **真宇宙数字轨**：`finaince bench` 在点时 CSI300 缓存上输出双窗表（默认 IS 2019–2023 / OOS 2024，双边 5 bps），缓存带 sha256。表不进 catalog。缓存不在仓库内，第三方要自己备好数据再重跑
-- **筛选地图与折叠验证**：`finaince sweep` 模板网格筛选 + `finaince wf-candidates` 候选逐年折。探索性结果不构成晋升
-- **沙箱分层**：冻结内建之上可选 bubblewrap。命令不含 `--share-net`；结果里的 `via` 标明实际用了哪一层
-- **治理内代码因子进化**：LLM 写 `compute(panel)` 进沙箱，失败按错误前缀检索后再改一稿，然后走同一套门禁
-- **动态组合**：对 ready 因子的日收益序列做滚动逆波动加权（权重用到 t−1），换手按权重向量计成本。这不是股票持仓组合
-- **BRAIN 外部裁决**：治理流产出可提交平台评级并回写 catalog；无凭据时声明降级为内部双窗基准
-- **语料战役**：券商研报批量治理内复现，断点续跑，`no_factors` 是诚实终态
-- **过程记忆**：以「门禁+对抗存活」做信用分配，AST 差异编辑动机加权记忆注入 advisor；经验链降为展示层
-- **研究循环**：没有筛选产物、也没有 `--expression` 时返回 `expression_queue_empty`，不会去评测一条默认公式。`FINAINCE_MODEL_HEAD` 是曲线择时：在一条组合收益曲线的滞后项上拟合 OLS 或 LightGBM，不是模型研发。库缺失时跳过
-- **对抗评审**：`approve` 默认在全新子进程里重跑评测。只有 CLI 的 `--no-adversary` 能跳过。HTTP 不能跳过
-- **教练层**：低相关样例采样 + 失败教训蒸馏（`research_context`），回灌到提案与 advisor
-- **事件链**：每步带 hypothesis 的 trace 链，按错误前缀检索同类失败
-
-### 与同类工具的对比
-
-| 工具 | 运行方式 | 数据来源 | 使用场景 |
-|---|---|---|---|
-| RD-Agent | 整夜自动运行 Qlib CSI300 | 公开的 CSI300 数据 | 批量自动化测试 |
-| FinAlpha | 人工审查 + 自动化检测 | 内置 `local_panel` + 自定义数据 | 精细化因子管理 |
-
-与 RD-Agent 等自动化工具不同，FinAlpha 更强调**用户的主观能动性**。系统不会自动运行所有因子，而是提供工具让您：
-
-1. **自主审查目录**：您可以自由浏览、筛选和管理因子目录
-2. **验证研报内容**：您可以复现并验证卖方研报中的因子和结论
-3. **明确数据来源**：在发布任何数据时，您必须明确标注数据来源于 `local_panel`、交易成本为 0 bps
-
-这种设计理念使得 FinAlpha 更适合需要对因子进行精细化管理和深度分析的专业用户。
-
-> **关于 Qlib 的说明**：Qlib 框架公开发布的数据基于长窗口的 CSI300 指数成分股。而 FinAlpha 发布的测试数据则基于固定的短窗口。两者的数据周期和股票范围都有所不同，请在使用时注意区分。
->
-> 哪台核产出数字见 [docs/architecture.md](docs/architecture.md)。竞品笔记 [docs/competitor-analysis.md](docs/competitor-analysis.md) 与 [docs/improvement-plan-v3.md](docs/improvement-plan-v3.md) 是历史文档，里面的「已收口」表不要当作验收线。逐步实现记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+关于 FinAlpha 与微软 RD-Agent 等无人值守演化框架的定位差异，可参考历史调研笔记 [docs/rdagent-gap.md](docs/rdagent-gap.md) 与 [docs/competitor-analysis.md](docs/competitor-analysis.md)。
 
 ---
 
-## 测试
+## 测试与代码质量
 
-FinAlpha 提供了完善的测试体系，确保系统功能的稳定性和可靠性。
-
-### 单元测试
-
-运行以下命令可以执行系统的大部分单元测试：
+运行全量离线测试（无需联网或外部 API 密钥）：
 
 ```bash
-python -m pytest tests --ignore=tests/test_live_real.py
+uv run pytest -q -m "not live"
 ```
 
-这些测试涵盖了系统的核心功能，包括因子计算、数据处理、API 接口等。
-
-### 可选的集成测试
-
-系统还提供了一部分集成测试，用于验证与外部服务的交互：
+检查核心治理模块的测试覆盖率（CI 强制要求不低于 82%）：
 
 ```bash
-pytest -m live
+uv run pytest tests --ignore=tests/test_live_real.py \
+  --cov=finaince.expr_ast --cov=finaince.db --cov=finaince.data_track \
+  --cov=finaince.combination --cov=finaince.code_evolution --cov=finaince.corpus_campaign \
+  --cov=finaince.brain_track --cov=finaince.process_memory --cov=finaince.domain.scoring
 ```
 
-这些测试包括：
-- **券商 PDF**：测试从券商获取研报 PDF 的功能
-- **米筐**：测试与米筐数据服务的集成
-- **聊天模型**：测试与大语言模型的交互
-
-> **重要提醒**：这部分测试需要相应的 API 凭证才能正常运行。如果您没有配置相关的 API 密钥或访问权限，请**不要**运行这些测试，否则会导致测试失败。
+涉及米筐实盘拉数、真实 PDF 解析与在线大模型的测试已标记为 `live`，按需通过 `uv run pytest -m live` 触发。
 
 ---
 
-## 参与贡献
+## 贡献与许可证
 
-FinAlpha 是一个开源项目，我们欢迎并鼓励社区的参与和贡献。无论是代码贡献、文档改进、bug 报告还是功能建议，都是对项目发展的重要支持。
+开发环境搭建与 PR 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-有关如何参与贡献的详细信息，请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 文件。该文件包含了：
-- 项目的开发环境搭建指南
-- 代码提交的规范和流程
-- Pull Request 的审查标准
-- 社区行为准则
+本项目基于 [GNU Affero General Public License v3.0](LICENSE) 发布，版权与第三方引擎声明见 [NOTICE](NOTICE)。

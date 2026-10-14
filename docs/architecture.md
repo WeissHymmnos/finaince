@@ -1,75 +1,88 @@
-# FinAlpha 现状（评测核与可引用数字）
+# FinAlpha 架构与评测核说明
 
-| 字段 | 值 |
-|------|-----|
-| 日期 | 2026-10-12 |
-| 地位 | **唯一现状说明**。竞品对比、RD-Agent 差距、v3 改进计划里的「已收口」表以本文为准 |
-| 包 | `finaince` 0.1.0，产品名 FinAlpha |
-
-`finaince doctor` 的 `evaluation_cores` 段报告下面三台核此刻是否就绪，并用 `catalog_writers` 列出 catalog 写入方。三台核的 `writes_catalog` 都是 false。缺 pit 缓存不会让 `ok` 变 false。
-
-## 三台核，两套账
-
-| 核 | `engine` | 入口 | 写入 catalog | 可引用 |
-|---|---|---|---|---|
-| 点时截面 | `pit_core` | `finaince bench`、`finaince sweep` | 否 | 缓存与 manifest 都在时，bench 表可以引用；sweep 仍是筛选，不是晋升依据 |
-| 引擎回测 | `engine_native` | `finaince eval --dialect repro_polars` → `reproagent` `build_backtest_bundle` | 否。写入方是 `loop._catalog_candidate` 和 `isolate.upsert_isolated` | 否。bundle 自己建 DataLoader，吃不了显式点时股票池 |
-| Qlib | `qlib` | `finaince eval --dialect qlib` | 否 | 否。3.12 上默认走进程内 `qlib_child` |
-
-晋升读 catalog 里的记录。缺 `engine` 或窗口的行失败名为 `unprovenanced`。`citable` 为 false 的行（包括 `engine_native`）失败名为 `not_citable`，不能单独晋升。`finaince eval` 和 `finaince bench` 只打印指标，不写 catalog。catalog 的写入方是 `loop._catalog_candidate` 和 `isolate.upsert_isolated`，状态是 `candidate`。`finaince doctor` 的 `evaluation_cores.catalog_writers` 列出这两个名字，三台核的 `writes_catalog` 都是 false。`sweep` 只在 `dedup_catalog` 打开时按 `expr_hash` 查重，不写入目录。
-
-因此：目录里的 IC 与基准表上的 IC 不是同一笔账。引用数字时带上 `engine`、窗口、`cost_bps`、宇宙和 `data_version`。
-
-## 安装探针，不是研究默认值
-
-`finaince baseline` 锁在包装内的 `local_panel`：两只股票，2023-01-03 → 2023-02-10，成本 0 bps，表达式 `Rank(Delta(close, 1))`。这些数字只证明安装能复现。
-
-`finaince baseline` 仍是上面的安装探针。`finaince loop` 在没有筛选产物、也没有 `--expression` 时返回 `expression_queue_empty`，不会去评测 `Rank(Delta(close, 1))`。有产物时，因子步经 `loop._catalog_candidate` 把评测结果写入 catalog，状态 `candidate`。
-
-`model_head.train_head` 和 loop 的第二步是曲线择时：拟合一条组合收益曲线的滞后项。CLI 帮助用 curve timing 描述它。这不是截面模型研发。
-
-`combination.try_combine_ready` 只接受 `engine=pit_core` 且窗口一致的 ready 成员。窗口不一致时原因是 `incompatible_windows`。权重作用在收益序列上，不是股票持仓。
-
-可引用评测走 `finaince eval --backend pit` 和 `finaince bench`。两者调用 `finaince.eval.pit_core`。`--backend local` 仍是 `engine_native`，`citable` 为 false，不能单独作为晋升依据。
-
-## 治理
-
-已在 `evaluate_gates` 主路径上：`unprovenanced`（缺 `engine` 或窗口）、`not_citable`、`thin_panel`、`formula_proxy`、空 IC、IC 阈值、收益相关、空代码、`weak_ic`、`inflated_sharpe`、`homogeneous`、`overcomplex`。`unprovenanced` 和 `not_citable` 不能被 override 跳过。`weak_ic` 的 detail 写明用的是 `rank_icir` 还是 `icir`。HTTP 请求体带 `override` 固定 403。
-
-`approve` 默认跑对抗重评。只有 CLI `--no-adversary` 可以跳过。HTTP 没有这个开关。
-
-旧 catalog 行在打开库时写成 `engine=unknown`、`citable=false`，状态不变，不会被自动批准。
-
-`isolate.py` 的 bwrap 命令是 `bwrap --unshare-all`，不带 `--share-net`。冻结导入表拒绝子进程里的 `socket`。没有表达式、或评测核没有打出分的 `compute(panel)` 不进 catalog。隔离失败仍写一条 trace。
-
-过程记忆只有同时过了门禁和对抗重评才加信用。BRAIN 回写进 lineage，不改本地 `ic`。无凭据时 `adjudication_level` 是 `internal_dual_window`。战役的 `ready_pit_core` 只数 `engine=pit_core` 且可引用的 ready 行，可以为 0。`no_factors` 不产生 ready 行。
-
-换手模型名是 `quintile_membership_churn`。请求行业中性但面板没有 `industry` 列时，中性化记为 `skipped_no_industry`，IC 不标成已中性化。成分股按每年 6 月和 12 月的第二个星期五切换；当天停牌名单从可交易集合里去掉。
-
-工作台：`FINAINCE_PACKAGED_SPA=1` 使用仓库里的 `src/finaince/web/index.html`。目录行显示 engine、窗口、成本、`citable`。不可引用的行折叠。批准按钮在对抗重评通过前不可用。任务区显示 status、cancel、failure reason、trace id。
-
-## 引擎钉死的版本
-
-`pyproject.toml` extras（升级引擎另开变更，不跟文档勘误绑在一起）：
-
-| 包 | commit |
+| 属性 | 说明 |
 |---|---|
-| reproagent | `18702585ed19f50c85c9dd9b023ebff2a09a56f7` |
-| aiminer | `99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa` |
-| finpdfpro (`finreportparser`) | `fb5314833a816d40201fb1173a6afe6788dfba2c` |
+| 更新日期 | 2026-10-14 |
+| 适用范围 | `finaince` 0.1.0（产品名 **FinAlpha**）当前主分支 |
+| 定位 | 定义系统内三台评测核的职责边界、Catalog 写入权、晋升门禁规则与可引用数据的判定标准 |
 
-`FINAINCE_PATH_HACK` 默认关。公开安装走上面的 git 依赖，不走作者机器上的兄弟目录。
+执行 `finaince doctor` 时，输出中的 `evaluation_cores` 字段会汇报当前环境下三台评测核的就绪状态，并在 `catalog_writers` 中列出允许向因子目录（Catalog）写入候选记录的入口。
 
-## 仓库里没有的东西
+---
 
-点时行情缓存不在 git 里（`data/` 被忽略）。`docs/CHANGELOG.md` 记录过一次本机 `finaince bench` 的种子因子数字。那次运行的 parquet 与 JSON 不在本仓库中，第三方不能凭克隆结果复核那张表。在 `docs/bench/` 出现可复现的表之前，README 不把那些格子当作公开引用数字。
+## 1. 三台评测核与两套数据账本
 
-## 历史文档
+FinAlpha 内置三台评测核，严格区分**可对外引用的点时（Point-in-Time）截面回测**与**仅供安装验证/探索的本地回测**：
 
-下面几份保留作设计记录。其中的「已收口」和「超越」里程碑不是当前验收状态。对方论文里的收益数字和平台评级率只出现在那些历史文档里，不是本仓库的测量：
+| 评测核 | `engine` 标识 | 调用入口 | 直接写入 Catalog | 结果是否可引用 (`citable`) | 说明 |
+|---|---|---|:---:|:---:|---|
+| 点时截面核 | `pit_core` | `finaince bench`、`finaince eval --backend pit`、`finaince sweep` | 否 | **是**（需点时缓存与 `.manifest.json` 完整） | 基于Polars 向量化截面计算，包含历史成分股切换、停牌/一字涨跌停过滤与五分位换手双边扣费 |
+| 引擎原生核 | `engine_native` | `finaince eval --dialect repro_polars --backend local`（底层委托 `reproagent` 的 `build_backtest_bundle`） | 否 | **否** | `build_backtest_bundle` 内部自建固定 DataLoader，不支持显式点时动态股票池，结果不可单独作为晋升或外部引用依据 |
+| Qlib 评测核 | `qlib` | `finaince eval --dialect qlib` | 否 | **否** | Python 3.12 下默认通过进程内 `qlib_child` 执行算子评测，用于方言验证与兼容回测 |
 
-- `docs/competitor-analysis.md`
-- `docs/rdagent-gap.md`
-- `docs/improvement-plan-v3.md`
-- `docs/platform-improvement.md`
-- `docs/platform-improvement-v2.md`
+### 目录写入与晋升隔离规则
+
+- **评测命令只读不写库**：`finaince eval`、`finaince bench` 与 `finaince sweep` 仅计算并输出指标（`sweep` 在开启 `--dedup-catalog` 时只按 `expr_hash` 查重），三台评测核自身的 `writes_catalog` 均为 `false`。
+- **唯一合法的候选写入入口**：只有研究主循环 `loop._catalog_candidate` 与沙箱实现命令 `isolate.upsert_isolated`（`finaince impl`）会将候选因子写入 Catalog（初始状态为 `candidate`）。
+- **溯源缺失或不可引用一律拒止**：晋升审查读取 Catalog 记录时，缺少 `engine` 或回测起止窗口的记录会触发 `unprovenanced`；`citable=false` 的记录（包含所有 `engine_native` 与旧库迁移产生的 `engine=unknown` 记录）会触发 `not_citable`。这两项门禁**不可通过 `--override` 豁免**。
+- **引用规范**：目录中的历史复现 IC 与 `finaince bench` 基准表上的 IC 属于不同账本。对外引用任何指标时，必须同时注明 `engine`、时间窗口、`cost_bps`、股票池（universe）以及 `data_version`。
+
+---
+
+## 2. 核心工作流职责边界
+
+### 安装探针（`finaince baseline`）
+`finaince baseline` 锁死在随包分发的 `local_panel`（两只股票，`2023-01-03` → `2023-02-10`，`0 bps`，`Rank(Delta(close, 1))`）。它的唯一职责是验证本地环境安装完好且计算结果确定可复现，绝不作为研究默认配置。
+
+### 研究主循环与曲线择时（`finaince loop` & `model_head.py`）
+- `finaince loop` 在未提供 `--expression` 且不存在筛选产物（`sweep_*.json`）时，直接返回 `expression_queue_empty`，不会静默回退去刷默认公式。
+- 循环的第二步（`model_head.train_head`）是**单因子/组合收益曲线的滞后项择时**（采用严格因果的 Walk-Forward 滚动窗口拟合 OLS 或 LightGBM，根据预测值做仓位缩放并扣除换手成本），而非股票截面预测模型训练。
+
+### 动态因子组合（`combination.py`）
+`combination.try_combine_ready` 仅接收 `engine=pit_core`、状态为 `ready` 且回测窗口一致的因子成员（窗口不一致时返回 `incompatible_windows`）。权重基于 $t-1$ 日及之前的滚动逆波动率计算，作用在各因子的日收益序列上，并按每日权重向量的 L1 变化率扣除双边交易成本。
+
+---
+
+## 3. 治理门禁与安全机制
+
+### 门禁主路径（`evaluate_gates`）
+晋升审核依次执行以下门禁检查：
+1. **溯源与可引用性**：`unprovenanced`、`not_citable`（均不可 override）
+2. **数据真实性与样本宽度**：`simulated`、`formula_proxy`、`thin_panel`（实际载入面板资产数 $< 20$）
+3. **基础统计门槛**：`missing_ic`、`ic_threshold`（$|IC| \le 0.005$）、`missing_returns`、`empty_code`
+4. **相关性与多重检验**：
+   - `correlated`：与池内已有因子的日收益相关性 $> 0.7$
+   - `weak_ic`：Harvey–Liu $t$ 统计量 $|ICIR| \times \sqrt{N_{\text{days}}} < 3.0$（在 `details` 中明确标注使用的是 `rank_icir` 还是 `icir`）
+   - `inflated_sharpe`：Bailey–López de Prado 缩减夏普比率 $\text{DSR} < 0.95$（试验次数 $N$ 从审计链中的 `eval` / `isolated_impl` 事件统计）
+5. **AST 结构正则化**：
+   - `homogeneous`：与种子库或目录已有因子的最大 AST 子树相似度 $> 0.85$
+   - `overcomplex`：AST 节点数 $> 40$、自由参数 $> 6$ 或引用特征数 $> 8$
+
+### 对抗重评与沙箱隔离
+- **独立子进程对抗重评（`adversary.py`）**：`finaince review --approve` 默认启动干净子进程重新计算该因子的 IC 与 Sharpe，与入库记录偏差超出容差即否决晋升。仅 CLI 调试参数 `--no-adversary` 可跳过；HTTP 接口无此开关，且携带 `override` 请求体固定返回 `403`。
+- **双层代码沙箱（`isolate.py`）**：执行用户或 LLM 编写的 `compute(panel)` 代码时，先通过 `ast.NodeVisitor` 白名单拦截属性反射（如 `getattr`、`__subclasses__`）、危险内建函数与非授权模块导入，再优先通过 `bwrap --unshare-all`（无 `--share-net` 网络隔离）或受限冻结内建环境运行子进程。
+- **过程记忆与外部裁决**：过程记忆（`process_memory.py`）仅对同时通过门禁与对抗重评的候选赋予正向信用；WorldQuant BRAIN 裁决轨（`brain_track.py`）将平台外部评级回写至 `lineage` 而不篡改本地 IC，无凭据时显式标注 `adjudication_level="internal_dual_window"`；研报语料战役（`corpus_campaign.py`）的 `ready_pit_core` 仅统计 `engine=pit_core` 且可引用的因子。
+
+---
+
+## 4. 外部引擎版本锁定与数据边界
+
+`pyproject.toml` 中的可选依赖通过固定 Git Commit SHA 锁定上游引擎版本，默认关闭本地兄弟目录注入（`FINAINCE_PATH_HACK` 默认关闭）：
+
+| 依赖包 | 锁定 Commit SHA |
+|---|---|
+| `reproagent` | `18702585ed19f50c85c9dd9b023ebff2a09a56f7` |
+| `aiminer` | `99e0924e41cc6c8d70d7670cdf1cf0c63bb3aeaa` |
+| `finreportparser` (`finpdfpro`) | `fb5314833a816d40201fb1173a6afe6788dfba2c` |
+
+CSI300 点时行情缓存（`data/`）受版权与体积限制不包含在 Git 仓库中。在第三方使用相同 `data_version` 复核并归档公开基准表之前，历史开发日志（`docs/CHANGELOG.md`）中的本机运行记录不作为公开引用数据。
+
+---
+
+## 5. 历史设计归档
+
+`docs/` 目录下的其余文档保留了早期竞品调研与分阶段设计记录，文中的历史进度表不代表当前验收标准，系统现行行为一律以本文档及源码实现为准：
+- [docs/competitor-analysis.md](competitor-analysis.md) — 量化 Agent 竞品机制调研（2026-08）
+- [docs/rdagent-gap.md](rdagent-gap.md) — 与微软 RD-Agent 的定位与功能对照（2026-08）
+- [docs/improvement-plan-v3.md](improvement-plan-v3.md) — WS-A 至 WS-L 工作流原始设计方案
+- [docs/platform-improvement.md](platform-improvement.md) / [docs/platform-improvement-v2.md](platform-improvement-v2.md) — 早期平台迭代方案归档

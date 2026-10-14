@@ -2,21 +2,26 @@
 
 **English** · [中文](README.zh-CN.md)
 
-Fail-closed research desk for **China sell-side factor work**: catalog a candidate, evaluate it on a locked local panel, promote it only when the gates pass, and reproduce a 研报 through `reproagent` + `finpdfpro`.
+FinAlpha (`finaince` on PyPI/uv) is a local research desk for China A-share factor work and sell-side report (研报) reproduction. It keeps candidate factors in a local SQLite catalog, scores them across explicit evaluation cores, blocks promotion whenever provenance or statistical gates fail, and reproduces broker PDFs through `reproagent` and `finpdfpro`.
 
-The installable package name is `finaince`. The product name is **FinAlpha**.
-
-**[Product handbook](docs/handbook.md)** — full tutorial (Chinese), CLI reference, HTTP contract, and workbench screenshots.
+- **[Product Handbook (中文)](docs/handbook.md)** — end-to-end walkthrough, CLI reference, HTTP API contract, and workbench screenshots.
+- **[Architecture & Evaluation Cores](docs/architecture.md)** — how the three evaluation cores work, which numbers are citable, and how promotion gates enforce provenance.
 
 ![Catalog with a desk token](docs/handbook/images/01-catalog.png)
 
-`finaince baseline` runs the two stocks shipped as `local_panel`: cost 0 bps, expression `Rank(Delta(close, 1))`. Those numbers only show that the install ran.
+---
 
-License: [GNU Affero General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for copyright and third-party engines.
+## Design Premises
 
-## Public install (Python 3.12)
+1. **Fail-closed promotion.** A factor cannot enter the pool if its panel has fewer than 20 stocks (`thin_panel`), if it relies on a placeholder formula (`formula_proxy`), if its evaluation core is non-citable (`not_citable`), or if it fails multiple-testing and structural deduplication checks (`weak_ic`, `inflated_sharpe`, `homogeneous`, `overcomplex`).
+2. **Adversarial verification on approval.** Approving a promotion spawns a fresh subprocess to re-evaluate the factor independently and checks that IC and Sharpe match the catalog record within tolerance. Over HTTP, neither gate overrides nor skipping the adversary is permitted.
+3. **Explicit provenance on every number.** The repository ships a two-stock `local_panel` fixture (2023-01-03 to 2023-02-10, 0 bps) strictly as an installation smoke test (`finaince baseline`). Real research requires either a point-in-time CSI300 parquet cache (`finaince bench`) or a full market panel via `FINAINCE_PANEL_PATH` / RiceQuant.
 
-You only need this public repository. Engines resolve from public GitHub at pinned commits (see `pyproject.toml` extras). Sibling `src` injection stays off unless you set `FINAINCE_PATH_HACK=1`.
+---
+
+## Installation (Python 3.12)
+
+Clone this repository and install with `uv`. The reproduction and discovery engines are pulled directly from public GitHub repositories at pinned commits declared in `pyproject.toml`.
 
 ```bash
 git clone https://github.com/WeissHymmnos/finaince.git
@@ -24,97 +29,118 @@ cd finaince
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install -e ".[reproduction]"
-cp .env.example .env   # set FINAINCE_DESK_TOKEN before `finaince serve`
+cp .env.example .env   # set FINAINCE_DESK_TOKEN before starting the server
 finaince doctor
 ```
 
-`doctor` exits 0 only when its JSON `ok` is true. `import finaince, reproagent` and `from aiminer.manager import cull_alpha_pool` must work after this install. Catalog/review reads and mutation HTTP require `FINAINCE_DESK_TOKEN`. Bind default is `127.0.0.1:8000`. Binding `0.0.0.0` needs `FINAINCE_ALLOW_PUBLIC_BIND=1`.
+`finaince doctor` verifies imports (`finaince`, `reproagent`, `aiminer`), database paths, the local panel, and the Qlib evaluation child, exiting `0` only when every check passes.
 
-Optional extras: `.[agent]` (Claude Agent SDK), `.[dev]` (pytest), `.[all]`.
+Optional extras:
+- `.[discovery]` — `aiminer` factor discovery swarm
+- `.[gbm]` — LightGBM curve-timing head
+- `.[agent]` — Claude Agent SDK integration
+- `.[dev]` — `pytest`, `pytest-cov`, `ruff`
+- `.[all]` — all optional dependencies
 
-The wheel ships a stub workbench (`finaince/web/index.html`). A full Catalog/Review UI needs a built `aiminer/frontend/dist`. `FINAINCE_PACKAGED_SPA=1` forces the stub when a sibling dist is present.
+By default, `finaince serve` binds to `127.0.0.1:8000` and requires `FINAINCE_DESK_TOKEN` for all `/api/v1` reads and writes (except `/api/v1/health` and `/api/v1/baseline`). Binding to `0.0.0.0` requires `FINAINCE_ALLOW_PUBLIC_BIND=1`. The Python wheel includes a lightweight zero-build workbench (`finaince/web/index.html`); if a built `aiminer/frontend/dist` directory is present alongside the checkout, `finaince serve` mounts the full SPA unless `FINAINCE_PACKAGED_SPA=1` is set.
 
-## 15-minute path (shipped example)
+---
 
-Uses the two-stock `local_panel` parquet in the package. Every command is a real CLI entry. The [handbook](docs/handbook.md) walks the same path with screenshots.
+## 15-Minute Walkthrough
+
+The commands below run against the shipped two-stock `local_panel` fixture. See [docs/handbook.md](docs/handbook.md) for annotated screenshots of each step.
 
 ```bash
+# 1. Verify environment and run the locked install probe
 finaince doctor
 finaince baseline
+
+# 2. Evaluate expressions on the local panel (repro_polars and qlib dialects)
 finaince eval "Rank(Delta(close, 1))" --dialect repro_polars --backend local
 finaince eval 'Rank($close)' --dialect qlib --backend local
+
+# 3. Run an isolated Python factor implementation and record it in the catalog
 finaince impl examples/15min/compute.py --name rank_delta --universe local_panel
+
+# 4. Enqueue the candidate for promotion and inspect the review queue
 finaince promote '<catalog_id>' --to to_pool --yes
 finaince review
+
+# 5. Run review approval (triggers adversarial subprocess re-evaluation)
 finaince review --approve '<promotion_id>' --override thin_panel
+
+# 6. Launch the local web workbench
 finaince serve --host 127.0.0.1 --port 8000
 ```
 
-`finaince review --approve` runs adversarial re-evaluation unless you pass `--no-adversary`. HTTP `POST /api/v1/review/{id}/approve` with `{"override":[...]}` stays 403, and HTTP cannot skip the adversary. `--override thin_panel` skips only that named gate. The two-stock bundle row is `engine_native` and not citable, so it still fails `not_citable` and does not enter the pool.
+Note on Step 5: `--override thin_panel` bypasses only the 20-stock minimum for smoke testing. Because the two-stock `local_panel` run comes from `engine_native` (`citable=False`), the non-overridable `not_citable` gate still prevents smoke-test artifacts from entering the production pool.
 
-## baseline
+---
 
-`finaince baseline` (and `run_locked_baseline()`) lock a short window on the two stocks shipped in the package:
+## Evaluation Cores & Data Tracks
 
-| Field | Value |
+FinAlpha separates installation smoke tests from citable point-in-time benchmarks. Full details live in [docs/architecture.md](docs/architecture.md).
+
+### 1. Locked Install Probe (`finaince baseline`)
+
+`finaince baseline` (and `run_locked_baseline()`) evaluates a fixed configuration to verify that the calculation stack is deterministic:
+
+| Parameter | Value |
 |---|---|
-| window | 2023-01-03 → 2023-02-10 |
-| universe | `local_panel` |
-| cost | 0 bps |
-| expression | `Rank(Delta(close, 1))` |
-| dialect | `repro_polars` |
+| Window | `2023-01-03` → `2023-02-10` |
+| Universe | `local_panel` (2 stocks, 56 rows) |
+| Cost | `0 bps` |
+| Expression | `Rank(Delta(close, 1))` |
+| Dialect | `repro_polars` |
 
-Two consecutive runs must agree on `ok` and the reported IC/Sharpe. When you quote those numbers, say they come from the shipped `local_panel` at 0 bps. Promote/approve fail-closed with `thin_panel` while the loaded panel has fewer than 20 assets.
+Two consecutive runs must produce identical `ok`, IC, and Sharpe values. Numbers from `local_panel` are smoke-test outputs and must never be cited as empirical alpha.
 
-## Comparable numbers (真宇宙数字)
+### 2. Point-in-Time CSI300 Track (`finaince bench` & `--backend pit`)
 
-To evaluate on a full universe instead of the shipped smoke fixture, set `FINAINCE_PANEL_PATH` to a parquet file matching the `prices.parquet` schema (`trade_date`, `ts_code`, `close`, etc.). Alternatively, providing RiceQuant credentials (`RQ_USER` and `RQ_PASS`) unlocks `data_backend=ricequant`. All promoted numbers should explicitly quote the cost (e.g., `cost_bps`), the universe, and the backtest window to ensure comparability.
+For empirical evaluation on a point-in-time universe:
+- Set `RQ_USER` and `RQ_PASS` (or `RQ_TOKEN`) and run `finaince bench --sync` to populate the local point-in-time CSI300 parquet cache (`sha256`-verified yearly frames, semi-annual constituent snapshots, post-adjusted prices, suspension and limit-move filters).
+- Or point `FINAINCE_PANEL_PATH` at your own parquet panel matching the `prices.parquet` schema (`trade_date`, `ts_code`, `open`, `high`, `low`, `close`, `volume`, `amount`).
 
-`finaince bench` builds a point-in-time CSI300 table (default IS 2019–2023 / OOS 2024, 5 bps, sha256 cache). That table is `engine=pit_core` and does not enter the catalog. `finaince eval` and `finaince bench` print metrics only. Catalog candidates are written by `loop._catalog_candidate` and `isolate.upsert_isolated`. `finaince doctor` lists those names in `evaluation_cores.catalog_writers`; every core has `writes_catalog` false. See [docs/architecture.md](docs/architecture.md).
+`finaince bench` and `finaince eval --backend pit` share the same vectorized point-in-time evaluation core (`engine=pit_core`), charging double-sided transaction costs against quintile membership churn and enforcing last-day window embargoes.
 
-The cache and the bench JSON are not in this repository. A session log in `docs/CHANGELOG.md` records one local run; those cells are not a public citation until a table lands in `docs/bench/` and a third party can rerun it from `data_version`.
+---
 
-## Features
+## Core Capabilities
 
-- Catalog → eval → fail-closed promote/review on one desk
-- 研报复现 via `reproagent` and `finpdfpro` (layout and formulas)
-- Fixed-window eval on the two stocks shipped as `local_panel` (0 bps)
-- `qlib` dialect on the 3.12 slim extra via the in-process local child
-- Cost-aware eval (`cost_bps` net metrics) plus multiple-testing promotion gates: `weak_ic` (Harvey-Liu t ≥ 3) and `inflated_sharpe` (deflated Sharpe)
-- Generation-side regularization: AST originality (`homogeneous`) + complexity ceiling (`overcomplex`) gates, structural near-dup culling, catalog `expr_hash` dedup
-- Throughput: process-level local-panel cache, pending-job duplicate guard, `FINAINCE_MAX_JOBS` cap, sign-reflection for significant negative-IC factors
-- True-universe track (`finaince bench`): point-in-time CSI300 cache with sha256 manifests. The table is citable only for that run's provenance block, and it does not enter the catalog
-- Screening map (`finaince sweep`) with candidate walk-forward validation (`finaince wf-candidates`): template-grid screening on the pit core; output stays exploratory and is not a promotion
-- Sandbox layering: optional bubblewrap above frozen builtins. The bwrap command does not pass `--share-net`; `via` reports which layer actually ran
-- Governed code-factor evolution: LLM-written `compute(panel)` in the sandbox, failure-retrieval rewrites, then the same gates
-- Dynamic combination: daily inverse-volatility weights on ready factors' return series (no look-ahead), costed on weight churn
-- BRAIN adjudication: optional HTTP client; without credentials the result says the ruling fell back to the internal bench
-- Corpus campaign: batch broker-report reproduction with resume and honest `no_factors` accounting
-- Process memory: edit motives stored beside gate outcomes; experience chains are a display layer
-- Research loop: with no sweep artifact and no `--expression`, the command returns `expression_queue_empty` and does not evaluate a default formula. `FINAINCE_MODEL_HEAD` selects curve timing: an OLS or LightGBM fit on lags of one portfolio curve, not model research
-- Adversarial re-evaluation runs on `approve` unless the CLI debug flag `--no-adversary` is set. HTTP approve cannot skip it
-- Coaching layer: low-correlation factor samples and distilled failure lessons fed back into proposals (`research_context`)
-- Trace chain with per-step hypothesis; similar-failure retrieval by error prefix
+- **Sell-side PDF reproduction (`finaince reproduce` & `finaince campaign`)** — Extracts formulas and backtest specs from Chinese broker reports via `finpdfpro` + `reproagent`, supports batch directory campaigns with checkpoint resume, and records `no_factors` honestly when a report contains no testable signal.
+- **Promotion gates (`src/finaince/review/gates.py`)** — Enforces provenance (`unprovenanced`, `not_citable`), sample depth (`thin_panel`), statistical significance (`weak_ic` with Harvey–Liu $t \ge 3.0$, `inflated_sharpe` via Bailey–López de Prado Deflated Sharpe Ratio), return correlation caps (`correlated`), and AST-level structural checks (`homogeneous` subtree similarity $\le 0.85$, `overcomplex` token/parameter bounds).
+- **Operator-template grid screening (`finaince sweep` & `finaince wf-candidates`)** — Evaluates template $\times$ field $\times$ window grids and per-year walk-forward folds on the PIT core to map where IC lives before committing candidates to the research loop.
+- **Sandboxed code factors (`finaince impl` & `code_evolution.py`)** — Static AST allowlist validation plus optional `bwrap --unshare-all` network-isolated execution for `compute(panel)` factors, paired with error-prefix failure retrieval for iterative rewrites.
+- **Dynamic factor combination (`combination.py`)** — Combines `ready` (`pit_core`) factor return series using strictly causal ($t-1$) trailing inverse-volatility weights net of L1 weight-turnover costs.
+- **Research loop & process memory (`finaince loop`)** — Alternates factor evaluation steps with walk-forward curve-timing heads (`FINAINCE_MODEL_HEAD=ols|gbm`), crediting AST edit motives in process memory only when a candidate survives both gates and adversarial re-evaluation.
 
-Compared with nearby stacks: RD-Agent is an unattended Qlib CSI300 R&D loop; FinAlpha is a human review desk with Chinese sell-side PDF fidelity, and it says so when numbers come from the shipped `local_panel` at 0 bps. Which core produced a number is [docs/architecture.md](docs/architecture.md). The 2026-08 landscape notes live in [docs/competitor-analysis.md](docs/competitor-analysis.md); treat that file's status table as historical.
+For how FinAlpha compares with unattended Qlib loops like RD-Agent, see the historical notes in [docs/rdagent-gap.md](docs/rdagent-gap.md) and [docs/competitor-analysis.md](docs/competitor-analysis.md).
 
-## Tests
+---
+
+## Testing
+
+Run the offline test suite (no network or external credentials required):
 
 ```bash
-python -m pytest tests --ignore=tests/test_live_real.py
+uv run pytest -q -m "not live"
 ```
 
-Live PDF / RiceQuant / chat-LLM tests stay opt-in (`pytest -m live`) and are skipped without credentials.
-
-The governance modules (expr_ast, db, data_track, combination, code_evolution, corpus_campaign, brain_track, process_memory, domain scoring) carry an 82% coverage floor enforced in CI:
+Check coverage on the core governance modules (82% minimum enforced in CI):
 
 ```bash
-python -m pytest tests --ignore=tests/test_live_real.py \
+uv run pytest tests --ignore=tests/test_live_real.py \
   --cov=finaince.expr_ast --cov=finaince.db --cov=finaince.data_track \
   --cov=finaince.combination --cov=finaince.code_evolution --cov=finaince.corpus_campaign \
   --cov=finaince.brain_track --cov=finaince.process_memory --cov=finaince.domain.scoring
 ```
 
-## Contribute
+Live integration tests (RiceQuant data sync, real PDF parsing, live LLM queries) are opt-in via `pytest -m live`.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+---
+
+## Contributing & License
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and PR requirements.
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for copyright and third-party engine attributions.
