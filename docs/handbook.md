@@ -10,7 +10,7 @@
 
 FinAlpha 用于在本地管理卖方研报复现与选股因子评测：
 1. **入库（Catalog）**：通过研究主循环（`loop._catalog_candidate`）或沙箱代码实现（`finaince impl` / `isolate.upsert_isolated`）将候选因子登记到本地 SQLite 目录；或通过 `finaince reproduce` 从券商 PDF 研报中抽取公式并回测入库。
-2. **评测（Eval / Bench）**：`finaince eval` 与 `finaince bench` 负责计算并输出因子指标（评测命令本身只读，不会自动往目录写记录）。各评测核是否可引用（`citable`）及目录写入规则见 [architecture.md](architecture.md) 或 `finaince doctor` 输出的 `evaluation_cores` 字段。
+2. **评测（Eval / Bench）**：`finaince eval` 与 `finaince bench` 负责计算并输出因子指标（评测命令本身只读，不会自动往目录写记录）。各评测核是否可引用（`citable`）及目录写入规则可通过 `finaince doctor` 输出的 `evaluation_cores` 字段查看。
 3. **晋升与复核（Promote → Review → Pool）**：候选因子提交晋升后进入待审队列，必须通过默认拒止（fail-closed）的门禁检查与独立子进程对抗重评，才能进入正式因子池（Pool）。
 
 安装包内自带一份仅含两只股票的迷你行情面板 `local_panel`（`2023-01-03` 至 `2023-02-10`，交易成本 `0 bps`，测试公式 `Rank(Delta(close, 1))`）。`finaince baseline` 输出的 IC 与 Sharpe 仅用于确认本地安装与计算链路正常，不能当作实证研究结论引用。

@@ -1,7 +1,7 @@
 # Contributing to FinAlpha
 
 Repository: <https://github.com/WeissHymmnos/finaince>  
-Product handbook: [docs/handbook.md](docs/handbook.md) · Architecture: [docs/architecture.md](docs/architecture.md)
+Product handbook: [docs/handbook.md](docs/handbook.md)
 
 ## Development Setup
 

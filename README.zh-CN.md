@@ -5,7 +5,6 @@
 FinAlpha（Python 包名 `finaince`）是一个面向 A 股选股因子研究与卖方研报复现的本地工作台。它把候选因子纳入本地 SQLite 目录（Catalog）统一管理，在明确区分数据溯源的评测核上计算指标，通过默认拒止（fail-closed）的门禁与独立子进程对抗重评控制因子入池，并结合 `reproagent` 与 `finpdfpro` 从券商 PDF 研报中抽取公式与回测结果。
 
 - **[产品手册](docs/handbook.md)** — 完整命令行教程、工作台界面截图、HTTP 接口契约与环境变量字典。
-- **[架构与评测核说明](docs/architecture.md)** — 三台评测核的边界、目录写入规则与可引用数据的判定标准。
 
 ![填好 desk token 后的 Catalog 界面](docs/handbook/images/01-catalog.png)
 
@@ -79,7 +78,7 @@ finaince serve --host 127.0.0.1 --port 8000
 
 ## 评测核与数据口径
 
-FinAlpha 区分三台评测核（`pit_core`、`engine_native`、`qlib`），详见 [docs/architecture.md](docs/architecture.md)。
+FinAlpha 区分三台评测核（`pit_core` 点时截面核、`engine_native` 引擎原生核、`qlib` 评测核），可通过 `finaince doctor` 的 `evaluation_cores` 字段查看各核状态与 Catalog 写入规则。
 
 ### 1. 安装探针基准（`finaince baseline`）
 

@@ -20,3 +20,5 @@ htmlcov/
 .cov_cache/
 .sisyphus/
 .agents/
+/CODE_REVIEW_REPORT.md
+/docs/architecture.md

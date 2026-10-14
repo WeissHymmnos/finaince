@@ -5,7 +5,6 @@
 FinAlpha (`finaince` on PyPI/uv) is a local research desk for China A-share factor work and sell-side report (研报) reproduction. It keeps candidate factors in a local SQLite catalog, scores them across explicit evaluation cores, blocks promotion whenever provenance or statistical gates fail, and reproduces broker PDFs through `reproagent` and `finpdfpro`.
 
 - **[Product Handbook (中文)](docs/handbook.md)** — end-to-end walkthrough, CLI reference, HTTP API contract, and workbench screenshots.
-- **[Architecture & Evaluation Cores](docs/architecture.md)** — how the three evaluation cores work, which numbers are citable, and how promotion gates enforce provenance.
 
 ![Catalog with a desk token](docs/handbook/images/01-catalog.png)
 
@@ -79,7 +78,7 @@ Note on Step 5: `--override thin_panel` bypasses only the 20-stock minimum for s
 
 ## Evaluation Cores & Data Tracks
 
-FinAlpha separates installation smoke tests from citable point-in-time benchmarks. Full details live in [docs/architecture.md](docs/architecture.md).
+FinAlpha separates installation smoke tests from citable point-in-time benchmarks across three evaluation cores (`pit_core`, `engine_native`, and `qlib`). `finaince doctor` reports their readiness under `evaluation_cores`.
 
 ### 1. Locked Install Probe (`finaince baseline`)
 
