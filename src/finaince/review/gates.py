@@ -208,10 +208,13 @@ def evaluate_gates(
         try:
             from finaince.runtime import local_panel_is_thin, local_panel_stats
 
-            stats = local_panel_stats()
-            thin = bool(stats.get("thin")) or int(stats.get("n_assets") or 0) < 20
-            if not thin:
-                thin = local_panel_is_thin()
+            if record.metrics.n_names is not None:
+                thin = record.metrics.n_names < 20
+            else:
+                stats = local_panel_stats()
+                thin = bool(stats.get("thin")) or int(stats.get("n_assets") or 0) < 20
+                if not thin:
+                    thin = local_panel_is_thin()
         except Exception:
             thin = True
         if thin:
@@ -286,6 +289,7 @@ def evaluate_gates(
         n_days = len(returns) if returns else None
         t_stat = ic_t_stat(ic_ir, n_days)
         if t_stat is None:
+            failures.append("weak_ic")
             details["weak_ic"] = "insufficient_for_t_stat"
         elif abs(t_stat) < 3.0:
             failures.append("weak_ic")
@@ -308,6 +312,7 @@ def evaluate_gates(
             
         dsr = deflated_sharpe(returns, n_trials)
         if dsr is None:
+            failures.append("inflated_sharpe")
             details["inflated_sharpe"] = "insufficient_returns"
         elif dsr < 0.95:
             failures.append("inflated_sharpe")

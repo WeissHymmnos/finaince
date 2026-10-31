@@ -16,12 +16,22 @@ TRADING_DAYS = 252.0
 
 def sharpe_ratio(values: list[float] | tuple[float, ...], *, ddof: int = 0) -> float | None:
     """Annualized Sharpe of a daily return series; None when undefined (<20 obs or zero variance)."""
-    n = len(values)
+    clean: list[float] = []
+    for val in values:
+        if val is None:
+            continue
+        try:
+            fv = float(val)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(fv):
+            clean.append(fv)
+    n = len(clean)
     denom = n - int(ddof)
     if n < 20 or denom <= 0:
         return None
-    mean = sum(values) / n
-    var = sum((x - mean) ** 2 for x in values) / denom
+    mean = sum(clean) / n
+    var = sum((x - mean) ** 2 for x in clean) / denom
     std = math.sqrt(var) if var > 0 else None
     if std is None:
         return None
@@ -34,9 +44,12 @@ def equity_curve(daily: dict[str, float]) -> dict[str, float]:
     curve: dict[str, float] = {}
     for key in sorted(daily):
         try:
-            nav *= 1.0 + float(daily[key])
+            val = float(daily[key])
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(val):
+            continue
+        nav = max(1e-12, nav * (1.0 + val))
         curve[str(key)] = round(nav, 6)
     return curve
 
@@ -69,7 +82,11 @@ def ic_t_stat(ic_ir: float | None, n_days: int | None) -> float | None:
     """Harvey & Liu (2016) t-stat for IC: |ICIR| * sqrt(n_days)."""
     if ic_ir is None or n_days is None or n_days <= 0:
         return None
-    return ic_ir * math.sqrt(n_days)
+    try:
+        value = float(ic_ir) * math.sqrt(n_days)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def selection_score(
@@ -96,7 +113,10 @@ def library_grade(
     """0-100 + A/B/C/D. If expression is given, run the shipped FastMCP backtest path."""
     if expression:
         if callable(backtest_scorer):
-            return backtest_scorer(expression, backtest_id=backtest_id)
+            try:
+                return backtest_scorer(expression, backtest_id=backtest_id)
+            except TypeError:
+                return backtest_scorer(expression, backtest_id)
         # Drive the real scoring via the same math as FastMCP without swapping semantics.
         from finaince.tools import run_library_grade_backtest
 

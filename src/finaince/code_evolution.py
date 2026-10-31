@@ -21,8 +21,8 @@ from typing import Any
 from finaince._swallow import log_swallowed
 
 SEED_TEMPLATE = '''\
-NAME = "{name}"
-EXPRESSION = "{expression}"
+NAME = {name}
+EXPRESSION = {expression}
 
 def compute(panel):
     close = list(panel["close"])
@@ -39,8 +39,8 @@ def compute(panel):
 
 def default_seed(name: str = "code_evo", expression: str = "", window: int = 5) -> str:
     return SEED_TEMPLATE.format(
-        name=name,
-        expression=expression or "Rank(Delta(close, 5))",
+        name=repr(name),
+        expression=repr(expression or "Rank(Delta(close, 5))"),
         window=max(2, int(window)),
     )
 
@@ -67,14 +67,15 @@ def ast_edit_motive(previous: str, current: str) -> dict[str, Any]:
         signatures_equal = _signature(prev_lines) == _signature(cur_lines)
     except Exception:
         signatures_equal = False
-    for tag, _i1, _i2, j1, j2 in differ.get_opcodes():
+    for tag, i1, i2, j1, j2 in differ.get_opcodes():
         if tag == "insert":
             added += j2 - j1
         elif tag == "delete":
-            removed += j2 - j1
+            removed += i2 - i1
         elif tag == "replace":
             added += j2 - j1
-            removed += j2 - j1
+            removed += i2 - i1
+        if tag != "equal":
             changed_regions += 1
     return {
         "added_lines": added,
@@ -112,8 +113,8 @@ def build_rewrite_prompt(
         "Constraints:\n"
         "- define NAME and a function compute(panel) -> numeric list\n"
         "- panel is a dict of column lists (e.g. panel['close'])\n"
-        "- imports limited to math/statistics/json/datetime/collections/itertools/"
-        "functools/operator/decimal/typing/numpy/pandas/polars\n"
+        "- imports are forbidden; use preloaded math/statistics/json/datetime/"
+        "collections/itertools/functools/decimal and np/pd/pl when installed\n"
         "- no file IO, no network, no exec/eval/open/subprocess\n\n"
         f"Previous source:\n{textwrap.indent(previous_source, '    ')}\n\n"
         f"Failure: {error}\n"

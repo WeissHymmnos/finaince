@@ -114,13 +114,15 @@ def adversarial_review(promotion_id: str, *, tol_rel: float = 0.05, tol_abs: flo
         child_res = None
 
     if child_res:
+        from finaince.domain.factor import finite_ic
+
         child_metrics = child_res.get("metrics", {})
         
         # ic_match
-        recorded_ic = rec.metrics.ic
-        child_ic = child_metrics.get("ic")
+        recorded_ic = finite_ic(rec.metrics.ic)
+        child_ic = finite_ic(child_metrics.get("ic"))
         if child_ic is None:
-            child_ic = child_metrics.get("ic_mean")
+            child_ic = finite_ic(child_metrics.get("ic_mean"))
         if recorded_ic is None or child_ic is None:
             checks.append({"name": "ic_match", "ok": False, "detail": "missing_ic"})
         else:
@@ -129,13 +131,14 @@ def adversarial_review(promotion_id: str, *, tol_rel: float = 0.05, tol_abs: flo
             checks.append({"name": "ic_match", "ok": diff <= allowed, "detail": f"diff={diff:.4f}"})
             
         # sharpe_match
-        recorded_sharpe = rec.metrics.sharpe if rec.metrics.sharpe is not None else rec.metrics.sharpe_net
-        child_sharpe = child_metrics.get("sharpe_ratio")
+        raw_rec_sharpe = rec.metrics.sharpe if rec.metrics.sharpe is not None else rec.metrics.sharpe_net
+        recorded_sharpe = finite_ic(raw_rec_sharpe)
+        child_sharpe = finite_ic(child_metrics.get("sharpe_ratio"))
         if child_sharpe is None:
-            child_sharpe = child_metrics.get("sharpe_net")
-        if recorded_sharpe is None:
+            child_sharpe = finite_ic(child_metrics.get("sharpe_net"))
+        if raw_rec_sharpe is None:
             checks.append({"name": "sharpe_match", "ok": True, "detail": "skip_missing_recorded"})
-        elif child_sharpe is None:
+        elif recorded_sharpe is None or child_sharpe is None:
             checks.append({"name": "sharpe_match", "ok": False, "detail": "missing_child_sharpe"})
         else:
             diff = abs(child_sharpe - recorded_sharpe)

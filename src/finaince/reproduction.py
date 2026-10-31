@@ -35,9 +35,11 @@ def reproduce_report(
         kwargs.setdefault("start_date", window["start_date"])
         kwargs.setdefault("end_date", window["end_date"])
     raw = _reproduce_report(Path(pdf_path), cfg, backtest_kwargs=kwargs)
+    if not isinstance(raw, dict) or not raw:
+        raise RuntimeError("Reproduction engine returned an empty or invalid result")
     from finaince.impl_status import annotate_reproduce
 
-    return annotate_reproduce(raw if isinstance(raw, dict) else {"status": "no_factors", "factors": []})
+    return annotate_reproduce(raw)
 
 
 def validate_expression(expression: str) -> dict[str, Any]:

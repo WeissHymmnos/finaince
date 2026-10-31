@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from pathlib import Path
 
@@ -62,7 +63,7 @@ def token_from_headers(headers: dict[str, str] | None) -> str:
 def desk_auth_ok(headers: dict[str, str] | None) -> bool:
     expected = configured_desk_token()
     got = token_from_headers(headers)
-    return bool(expected) and bool(got) and got == expected
+    return bool(expected) and bool(got) and hmac.compare_digest(got.encode(), expected.encode())
 
 
 def configured_pdf_root() -> Path | None:

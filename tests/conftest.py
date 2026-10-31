@@ -21,12 +21,20 @@ def desk_headers() -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def _offline_unless_live(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+def _offline_unless_live(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Hermetic tests stay on mock LLM + local fixture unless marked live."""
     if request.node.get_closest_marker("live"):
         monkeypatch.delenv("ALLOW_MOCK_LLM", raising=False)
         monkeypatch.delenv("FINAINCE_ALLOW_MOCK_LLM", raising=False)
         return
+    # Every offline test is isolated, including tests that do not explicitly
+    # request isolated_home. Never fall back to the user's real desk database.
+    home = tmp_path / "offline-home"
+    monkeypatch.setenv("FINAINCE_HOME", str(home))
+    monkeypatch.setenv("AIMINER_DATA_DIR", str(home / "aiminer" / "data"))
+    monkeypatch.setenv("AIMINER_RESULTS_DIR", str(home / "aiminer" / "results"))
     monkeypatch.setenv("ALLOW_MOCK_LLM", "true")
     from finaince.runtime import packaged_local_panel
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -18,6 +19,18 @@ from fastapi.responses import PlainTextResponse
 from finaince._swallow import log_swallowed
 
 _WIKILINK = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _safe_child_path(base: Path, identifier: str, suffix: str) -> Path:
+    raw = str(identifier or "").strip()
+    if not raw or raw in {".", ".."} or ".." in raw or not _SAFE_ID.match(raw):
+        raise HTTPException(400, "invalid identifier")
+    root = base.resolve()
+    candidate = (root / f"{raw}{suffix}").resolve()
+    if not candidate.is_relative_to(root):
+        raise HTTPException(400, "invalid identifier")
+    return candidate
 
 
 def _page(items: list[Any], offset: int, limit: int) -> dict[str, Any]:
@@ -203,11 +216,11 @@ def _stable_id(*parts: Any) -> str:
 
 
 def _backtest_path(job_id: str) -> Path:
-    return _manual_dir("manual_backtests") / f"{job_id}.json"
+    return _safe_child_path(_manual_dir("manual_backtests"), job_id, ".json")
 
 
 def _strategy_path(strategy_id: str) -> Path:
-    return _manual_dir("manual_strategies") / f"{strategy_id}.json"
+    return _safe_child_path(_manual_dir("manual_strategies"), strategy_id, ".json")
 
 
 def _list_json_dir(kind: str) -> list[dict[str, Any]]:
@@ -303,6 +316,7 @@ def _eval_payload(body: dict[str, Any]) -> dict[str, Any]:
     universe = str(body.get("market") or body.get("universe") or "").strip() or default_universe(backend)
     start = body.get("start_date") or body.get("start")
     end = body.get("end_date") or body.get("end")
+    cost_bps = float(body["cost_bps"]) if body.get("cost_bps") is not None else 0.0
     try:
         result = evaluate(
             EvalRequest(
@@ -312,6 +326,7 @@ def _eval_payload(body: dict[str, Any]) -> dict[str, Any]:
                 universe=universe,
                 start=str(start) if start else None,
                 end=str(end) if end else None,
+                cost_bps=cost_bps,
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -813,7 +828,7 @@ def register_aiminer_fallbacks(app: FastAPI, *, reason: str) -> None:
     def factor_report(factor_id: str) -> PlainTextResponse:
         from finaince.settings import get_settings
 
-        path = get_settings().aiminer_results / "reports" / f"{factor_id}.md"
+        path = _safe_child_path(get_settings().aiminer_results / "reports", factor_id, ".md")
         if not path.is_file():
             raise HTTPException(404, "report not found")
         return PlainTextResponse(path.read_text(encoding="utf-8"), media_type="text/markdown; charset=utf-8")
@@ -831,7 +846,8 @@ def register_aiminer_fallbacks(app: FastAPI, *, reason: str) -> None:
             expected = os.getenv("AIMINER_RESET_TOKEN") or os.getenv("FINAINCE_RESET_TOKEN")
             if not expected:
                 raise HTTPException(503, "AIMINER_RESET_TOKEN is not configured on the server")
-            if str(payload.get("reset_token") or "") != expected:
+            provided = str(payload.get("reset_token") or "")
+            if not hmac.compare_digest(provided, expected):
                 raise HTTPException(403, "reset_token mismatch")
         paths = _reset_targets(scopes)
         plan = [{"path": str(path), "exists": path.exists()} for path in paths]

@@ -90,14 +90,15 @@ def test_submit_happy_path_fetches_grade(monkeypatch) -> None:
         if "/alphas/" in path:
             body = {"grade": "GOOD", "is": {"sharpe": 1.2, "fitness": 0.7}, "status": "ACTIVE"}
             return _Resp(content=json.dumps(body).encode("utf-8"), json_data=body)
-        return _Resp(content=b'{"progress": "COMPLETE"}', json_data={"progress": "COMPLETE"})
+        body = {"status": "COMPLETE", "alpha": "alpha456"}
+        return _Resp(content=json.dumps(body).encode("utf-8"), json_data=body)
 
     client = _FakeBrainClient(post=post, get=get)
     monkeypatch.setattr(bt, "_client", lambda: client)
     out = bt.submit_expression("Rank($close)")
     assert out["ok"] is True, out
     assert out["adjudication_level"] == "platform"
-    assert out["alpha_id"] == "sim123"
+    assert out["alpha_id"] == "alpha456"
     assert out["grade"] == "GOOD"
     assert out["is_sharpe"] == 1.2
     assert client.closed is True

@@ -47,23 +47,26 @@ def _panel_cache_disabled() -> bool:
     return os.environ.get("FINAINCE_PANEL_CACHE", "").strip().lower() in {"off", "0", "false"}
 
 
-def _local_panel_identity() -> tuple:
+def _local_panel_identity(data_root: Any = None) -> tuple:
     from pathlib import Path
 
     from finaince.runtime import raw_local_data_root
 
-    root = raw_local_data_root()
-    signature = ("", -1, -1)
-    if root:
-        probe = Path(root)
-        if probe.is_dir():
-            probe = probe / "prices.parquet"
+    root = data_root if data_root is not None else raw_local_data_root()
+    if not root:
+        return ()
+    path = Path(root).expanduser().resolve()
+    candidates = [path] if path.is_file() else [
+        path / name for name in ("prices.parquet", "prices.csv", "cb_prices.parquet", "cb_prices.csv")
+    ]
+    signatures = []
+    for probe in candidates:
         try:
             st = probe.stat()
-            signature = (str(probe), st.st_mtime_ns, st.st_size)
+            signatures.append((str(probe), st.st_mtime_ns, st.st_size))
         except OSError:
-            signature = (str(probe), -1, -1)
-    return signature
+            signatures.append((str(probe), -1, -1))
+    return tuple(signatures)
 
 
 def _install_panel_cache() -> bool:
@@ -91,7 +94,7 @@ def _install_panel_cache() -> bool:
             str(universe),
             getattr(start, "isoformat", lambda: str(start))(),
             getattr(end, "isoformat", lambda: str(end))(),
-            _local_panel_identity(),
+            _local_panel_identity(self.settings.local_data_path or "tests/fixtures/test_data"),
         )
         with _PANEL_CACHE_LOCK:
             hit = _PANEL_CACHE.get(key)
@@ -144,6 +147,68 @@ def is_listed(expression: str) -> bool:
     return all(name in names for name in found)
 
 
+def _validate_lag_windows(expression: str, dialect: str) -> str | None:
+    """Reject future references before dispatch, including older engine releases."""
+    import ast
+    import math
+    import operator
+
+    if dialect not in {"repro_polars", "qlib"}:
+        return None
+    source = expression.replace("$", "") if dialect == "qlib" else expression
+    if len(source) > 10_000:
+        return "expression_too_complex"
+    try:
+        tree = ast.parse(source, mode="eval")
+    except (SyntaxError, RecursionError):
+        return "invalid_expression"
+    if sum(1 for _ in ast.walk(tree)) > 1_000:
+        return "expression_too_complex"
+
+    operations = {
+        ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+        ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+    }
+
+    def constant(node: ast.AST) -> float:
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            result = float(node.value)
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            result = constant(node.operand) * (-1 if isinstance(node.op, ast.USub) else 1)
+        elif isinstance(node, ast.BinOp) and type(node.op) in operations:
+            result = operations[type(node.op)](constant(node.left), constant(node.right))
+        else:
+            raise ValueError("window must be a constant number")
+        if not math.isfinite(result) or abs(result) > 1_000_000:
+            raise ValueError("window is not a bounded finite number")
+        return result
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "id", None) or getattr(node.func, "attr", "")
+        if name.lower() == "lead":
+            return "future_data:lead"
+        if name not in {"Ref", "Delta", "Delay", "shift"}:
+            continue
+        argument_index = 0 if isinstance(node.func, ast.Attribute) else 1
+        window = node.args[argument_index] if len(node.args) > argument_index else next(
+            (kw.value for kw in node.keywords if kw.arg in {"n", "N", "periods", "window", "d"}),
+            None,
+        )
+        if window is None and name == "shift":
+            continue  # The method defaults to a one-row lag.
+        try:
+            value = constant(window)
+        except (ValueError, TypeError, ArithmeticError, RecursionError):
+            return f"invalid_lag_window:{name}"
+        if value < 0:
+            return f"future_data:{name}"
+        if not value.is_integer():
+            return f"invalid_lag_window:{name}"
+    return None
+
+
 def evaluate(req: EvalRequest) -> EvalResult:
     result = _evaluate(req)
     try:
@@ -163,6 +228,10 @@ def evaluate(req: EvalRequest) -> EvalResult:
 def _evaluate(req: EvalRequest) -> EvalResult:
     from finaince.eval.dialects import attach_translation
     from finaince.obs import emit
+
+    window_error = _validate_lag_windows(req.expression, req.dialect)
+    if window_error:
+        return EvalResult(ok=False, dialect=req.dialect, data_backend=req.data_backend, error=window_error)
 
     translation = attach_translation(req.expression, req.dialect)
     alt_text = translation.get("alt_text") if isinstance(translation.get("alt_text"), str) else None

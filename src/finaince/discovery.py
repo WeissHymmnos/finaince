@@ -259,11 +259,16 @@ def run_swarm(args: list[str] | None = None, *, timeout: float | None = None) ->
         return {"ok": True, "via": "inprocess", "args": argv}
 
     py = aiminer_python()
+    inject_llm_env(resolve_llm())
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(srcs[0])) + os.pathsep + env.get("PYTHONPATH", "")
+    if srcs:
+        import_paths = [str(Path(src)) for src in reversed(srcs) if Path(src).is_dir()]
+        if env.get("PYTHONPATH"):
+            import_paths.append(env["PYTHONPATH"])
+        if import_paths:
+            env["PYTHONPATH"] = os.pathsep.join(import_paths)
     env["AIMINER_RESULTS_DIR"] = str(cfg.aiminer_results)
     env["AIMINER_DATA_DIR"] = str(cfg.home / "aiminer" / "data")
-    inject_llm_env(resolve_llm())
     swarm_timeout = float(timeout if timeout is not None else (os.environ.get("FINAINCE_SWARM_TIMEOUT", "1800") or 1800))
     completed = subprocess.run(
         [py, "-m", "aiminer.manager", *argv],

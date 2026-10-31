@@ -334,7 +334,9 @@ def _factor_scores(frame: Any, name: str, *, _presorted: bool = False) -> Any:
     else:
         raise ValueError(f"unknown seed factor: {name}")
     ranked = raw.with_columns(
-        pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+        pl.when(pl.col("_raw").is_finite()).then(pl.col("_raw")).otherwise(None).alias("_raw")
+    ).with_columns(
+        pl.col("_raw").rank(method="average").over("trade_date").alias("_score")
     )
     return ranked.select(["trade_date", "ts_code", "_score"])
 
@@ -353,15 +355,29 @@ def _untradable_next_day_expr(columns: list[str]) -> Any:
     import polars as pl
 
     have = set(columns)
+    has_code = "ts_code" in have
+
+    def _next(expr: Any) -> Any:
+        return expr.shift(-1).over("ts_code") if has_code else expr.shift(-1)
+
     conds: list[Any] = []
     if "volume" in have:
-        conds.append(pl.col("volume").shift(-1).fill_null(0.0) <= 0.0)
-    if {"open", "high", "low"} <= have:
-        n_close = pl.col("close").shift(-1)
-        flat_bar = ((pl.col("high").shift(-1) - pl.col("low").shift(-1)).abs() < 1e-8) & (
-            (pl.col("open").shift(-1) - n_close).abs() < 1e-8
+        conds.append(_next(pl.col("volume")).fill_null(0.0) <= 0.0)
+    if {"open", "high", "low", "close"} <= have:
+        n_close = _next(pl.col("close"))
+        n_high = _next(pl.col("high"))
+        n_low = _next(pl.col("low"))
+        n_open = _next(pl.col("open"))
+        flat_bar = ((n_high - n_low).abs() < 1e-8) & ((n_open - n_close).abs() < 1e-8)
+        base_close = (
+            pl.col("close") * pl.col("adj_factor")
+            if "adj_factor" in have
+            else pl.col("close")
         )
-        big_move = (n_close / pl.col("close") - 1.0).abs() >= LIMIT_MOVE_THRESHOLD
+        next_base_close = _next(base_close)
+        big_move = (base_close > 1e-6) & (
+            (next_base_close / base_close - 1.0).abs() >= LIMIT_MOVE_THRESHOLD
+        )
         conds.append(flat_bar & big_move)
     if not conds:
         return None
@@ -382,7 +398,10 @@ def _forward_returns(frame: Any, *, _presorted: bool = False) -> Any:
     else:
         adj_close = pl.col("close")
     next_adj_close = adj_close.shift(-1).over("ts_code")
-    valid = (adj_close > 1e-6) & (next_adj_close > 1e-6)
+    valid = (
+        (adj_close > 1e-6) & (next_adj_close > 1e-6)
+        & adj_close.is_finite() & next_adj_close.is_finite()
+    )
     if untradable is not None:
         valid = valid & ~untradable
     return panel.with_columns(
@@ -475,6 +494,7 @@ def _daily_ic(
         u_df = _make_universe_frame(joined, universe_by_day)
         filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
 
+    filtered = filtered.filter(pl.col("_score").is_finite() & pl.col("_fwd_ret").is_finite())
     if filtered.is_empty():
         return []
 
@@ -493,8 +513,8 @@ def _daily_ic(
         panel.group_by("trade_date")
         .agg(
             pl.len().alias("n"),
-            pl.col("x").std().alias("sx"),
-            pl.col("y").std().alias("sy"),
+            pl.col("x").std(ddof=0).alias("sx"),
+            pl.col("y").std(ddof=0).alias("sy"),
             ((pl.col("x") - pl.col("x").mean()) * (pl.col("y") - pl.col("y").mean())).mean().alias("cov"),
         )
         .filter(
@@ -546,6 +566,7 @@ def _layered_long_short(
         u_days_set = _universe_days_aligned(joined, universe_by_day)
         all_days = sorted(d for d in joined["trade_date"].unique().to_list() if d in u_days_set)
 
+    filtered = filtered.filter(pl.col("_score").is_finite() & pl.col("_fwd_ret").is_finite())
     need = n_groups * 4
 
     if filtered.is_empty():
@@ -567,10 +588,10 @@ def _layered_long_short(
     daily_agg = (
         ranked.group_by("trade_date")
         .agg(
-            pl.col("_fwd_ret").filter(pl.col("_bucket") == 0).mean().alias("long_ret"),
-            pl.col("_fwd_ret").filter(pl.col("_bucket") == n_groups - 1).mean().alias("short_ret"),
-            pl.col("ts_code").filter(pl.col("_bucket") == 0).alias("long_codes"),
-            pl.col("ts_code").filter(pl.col("_bucket") == n_groups - 1).alias("short_codes"),
+            pl.col("_fwd_ret").filter(pl.col("_bucket") == n_groups - 1).mean().alias("long_ret"),
+            pl.col("_fwd_ret").filter(pl.col("_bucket") == 0).mean().alias("short_ret"),
+            pl.col("ts_code").filter(pl.col("_bucket") == n_groups - 1).alias("long_codes"),
+            pl.col("ts_code").filter(pl.col("_bucket") == 0).alias("short_codes"),
         )
         .sort("trade_date")
     )
@@ -669,7 +690,7 @@ def _scoped_universe(
     embargo: bool,
 ) -> dict[Any, set[str]]:
     days = sorted(d for d in universe_by_day_all if w_start <= d <= w_end)
-    if embargo and len(days) > 1:
+    if embargo and days:
         # The last day's forward return uses the next window's close.
         days = days[:-1]
     return {d: universe_by_day_all[d] for d in days}
@@ -683,16 +704,21 @@ def _factor_artifacts(
     _u_df: Any = None,
     _u_days_set: set[Any] | None = None,
 ) -> dict[str, Any]:
+    import polars as pl
+
     joined = (
         scores.join(forwards, on=["trade_date", "ts_code"], how="inner")
         .fill_nan(None)
         .drop_nulls()
+        .filter(pl.col("_score").is_finite() & pl.col("_fwd_ret").is_finite())
     )
     if joined.is_empty():
         return {
             "ic_vals": [],
             "rank_vals": [],
             "ls": ([], {}),
+            "n_names": 0,
+            "min_names": 0,
         }
     u_df = _u_df if _u_df is not None else _make_universe_frame(joined, scoped_universe)
     filtered = joined.join(u_df, on=["trade_date", "ts_code"], how="inner")
@@ -701,10 +727,14 @@ def _factor_artifacts(
             "ic_vals": [],
             "rank_vals": [],
             "ls": ([], {}),
+            "n_names": 0,
+            "min_names": 0,
         }
     u_days_set = _u_days_set if _u_days_set is not None else _universe_days_aligned(joined, scoped_universe)
     all_days = sorted(d for d in joined["trade_date"].unique().to_list() if d in u_days_set)
     return {
+        "n_names": filtered["ts_code"].n_unique(),
+        "min_names": filtered.group_by("trade_date").len()["len"].min(),
         "ic_vals": _daily_ic(scores, forwards, scoped_universe, spearman=False, _prejoined=filtered),
         "rank_vals": _daily_ic(scores, forwards, scoped_universe, spearman=True, _prejoined=filtered),
         "ls": _layered_long_short(scores, forwards, scoped_universe, _prejoined=filtered, _all_days=all_days),
@@ -716,6 +746,8 @@ def _metrics_from_artifacts(artifacts: dict[str, Any], cost_bps: float) -> dict[
     rank_mean, rank_ir = _icir_of(artifacts["rank_vals"])
     ls, turnover = artifacts["ls"]
     return {
+        "n_names": artifacts.get("n_names", 0),
+        "min_names": artifacts.get("min_names", 0),
         "ic": ic_mean,
         "rank_ic": rank_mean,
         "icir": ic_ir,
@@ -895,7 +927,7 @@ def run_bench(
             arts = _factor_artifacts(scores, forwards, scoped, _u_df=u_df, _u_days_set=u_days_set)
             factor_arts[label] = arts
             m = _metrics_from_artifacts(arts, cost_bps)
-            m["n_names"] = n_names
+            m["universe_n_names"] = n_names
             m["n_days"] = m.get("days")
             m["cost_bps"] = cost_bps
             m["turnover_model"] = TURNOVER_MODEL

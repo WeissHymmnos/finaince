@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import os
 import subprocess
 import sys
@@ -284,6 +285,30 @@ FORBIDDEN_ATTRS = frozenset(
         "load",
         "save",
         "fromfile",
+        "tofile",
+        "memmap",
+        "DataSource",
+        "loadtxt",
+        "genfromtxt",
+        "fromregex",
+        "recfromcsv",
+        "recfromtxt",
+        "dump",
+        "pickle",
+        "sql",
+        "SQLContext",
+        # str.format performs attribute traversal inside its format string,
+        # where the AST visitor cannot inspect or reject private attributes.
+        "format",
+        "format_map",
+    }
+)
+
+_IO_ATTR_PREFIXES = ("read_", "write_", "scan_", "sink_", "save", "open_")
+_IN_MEMORY_TO_ATTRS = frozenset(
+    {
+        "to_list", "to_dict", "to_dicts", "to_numpy", "to_pandas", "to_series", "to_frame", "to_arrow",
+        "to_numeric", "to_datetime", "to_timedelta", "to_records", "to_string",
     }
 )
 
@@ -322,6 +347,10 @@ class QuantASTValidator(ast.NodeVisitor):
             raise ASTSecurityError(f"Access to private/dunder attribute '{node.attr}' is forbidden")
         if node.attr in FORBIDDEN_ATTRS or node.attr in FORBIDDEN_NAMES:
             raise ASTSecurityError(f"Access to dangerous attribute '{node.attr}' is forbidden")
+        if node.attr.startswith(_IO_ATTR_PREFIXES) or (
+            node.attr.startswith("to_") and node.attr not in _IN_MEMORY_TO_ATTRS
+        ):
+            raise ASTSecurityError(f"Access to IO attribute '{node.attr}' is forbidden")
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
@@ -385,7 +414,7 @@ def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    panel = req.get("panel") or default_panel()
+    panel = default_panel() if req.get("panel") is None else req["panel"]
     ns = _safe_namespace(panel)
     try:
         compiled = compile(tree, "<isolated>", "exec")
@@ -397,6 +426,8 @@ def child_isolate(req: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": str(values["error"])}
     if not isinstance(values, list) or len(values) < 3:
         return {"ok": False, "error": "compute_must_return_numeric_list"}
+    if not all(math.isfinite(value) for value in values):
+        return {"ok": False, "error": "compute_must_return_finite_values"}
     return {
         "ok": True,
         "name": str(ns.get("NAME") or req.get("name") or "isolated"),
@@ -573,13 +604,20 @@ def run_isolated(
         {
             "source": source,
             "name": name,
-            "panel": panel or default_panel(),
+            "panel": default_panel() if panel is None else panel,
             "expression": expression,
         },
         default=str,
     )
     env = os.environ.copy()
     env["FINAINCE_ISOLATE"] = "1"
+    # pytest and source checkouts can add this package to sys.path without
+    # installing it. Carry the actual source location into the new interpreter
+    # instead of depending on a stale editable-install .pth or relative cwd.
+    package_root = str(Path(__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [package_root, *filter(None, env.get("PYTHONPATH", "").split(os.pathsep))]
+    )
     mode = sandbox_mode()
     avail_bwrap = bwrap_available()
     use_bwrap = avail_bwrap and mode in {"auto", "bwrap"}

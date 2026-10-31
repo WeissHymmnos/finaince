@@ -190,6 +190,15 @@ class FactorCatalog:
             data["citable"] = False
         return FactorRecord.model_validate(data)
 
+    def get_by_source_ref(self, source: str, source_ref: str) -> FactorRecord | None:
+        """Resolve an engine record ID to its stable platform catalog record."""
+        with managed_connection(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT id FROM factor_catalog WHERE source=? AND source_ref=?",
+                (source, source_ref),
+            ).fetchone()
+        return self.get(row[0]) if row else None
+
     def list(
         self,
         source: str | None = None,
@@ -267,6 +276,21 @@ class FactorCatalog:
                 (decision, promo_id),
             )
             conn.commit()
+
+    def transition_promotion(self, promo_id: str, decision: str, *, expected: str) -> bool:
+        """Claim or finish a promotion only if its durable decision still matches.
+
+        The transaction ends before callers write to engine stores. In-progress
+        decisions survive a process crash and must be reconciled before retry;
+        automatically reclaiming them could repeat a partially completed write.
+        """
+        with managed_connection(self.db_path) as conn:
+            updated = conn.execute(
+                "UPDATE promotion_events SET decision=? WHERE id=? AND decision=?",
+                (decision, promo_id, expected),
+            )
+            conn.commit()
+        return updated.rowcount == 1
 
 
 def default_catalog() -> FactorCatalog:

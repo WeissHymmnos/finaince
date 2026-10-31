@@ -165,8 +165,10 @@ def score_candidate(frame: Any, spec: dict[str, Any], *, _presorted: bool = Fals
     builder = TEMPLATES[spec["template"]][0]
     raw_expr = builder(spec["field"], int(spec["window"]))
     panel = frame if _presorted else frame.sort(["ts_code", "trade_date"])
-    ranked = panel.with_columns(raw_expr.alias("_raw")).with_columns(
-        pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+    ranked = panel.with_columns(
+        pl.when(raw_expr.is_finite()).then(raw_expr).otherwise(None).alias("_raw")
+    ).with_columns(
+        pl.col("_raw").rank(method="average").over("trade_date").alias("_score")
     )
     return ranked.select(["trade_date", "ts_code", "_score"])
 
@@ -440,7 +442,11 @@ def _layered_long_short_cadence(
 
     from finaince.data_track import _make_universe_frame, _universe_days_aligned
 
-    joined = scores.join(forwards, on=["trade_date", "ts_code"], how="inner").drop_nulls()
+    joined = (
+        scores.join(forwards, on=["trade_date", "ts_code"], how="inner")
+        .drop_nulls()
+        .filter(pl.col("_score").is_finite() & pl.col("_fwd_ret").is_finite())
+    )
     if joined.is_empty():
         return [], {}
     u_df = _make_universe_frame(joined, universe_by_day)
@@ -466,8 +472,8 @@ def _layered_long_short_cadence(
     daily_agg = (
         ranked.group_by("trade_date")
         .agg(
-            pl.col("ts_code").filter(pl.col("_bucket") == 0).alias("long_codes"),
-            pl.col("ts_code").filter(pl.col("_bucket") == n_groups - 1).alias("short_codes"),
+            pl.col("ts_code").filter(pl.col("_bucket") == n_groups - 1).alias("long_codes"),
+            pl.col("ts_code").filter(pl.col("_bucket") == 0).alias("short_codes"),
         )
         .sort("trade_date")
     )
@@ -489,23 +495,17 @@ def _layered_long_short_cadence(
     turnover_by_day: dict[Any, float] = {}
     prev_legs: tuple[set[str], set[str]] | None = None
     since_refresh = 0
+    every = max(1, int(rebalance_every))
 
     for day in all_days:
         if day not in day_set_valid:
             prev_legs = None
             continue
-        day_rets = ret_dict.get(day, {})
-        if prev_legs is not None:
-            l_vals = [day_rets[c] for c in prev_legs[0] if c in day_rets]
-            s_vals = [day_rets[c] for c in prev_legs[1] if c in day_rets]
-            long_ret = sum(l_vals) / len(l_vals) if l_vals else 0.0
-            short_ret = sum(s_vals) / len(s_vals) if s_vals else 0.0
-        else:
-            long_ret = short_ret = 0.0
-        ls = float(long_ret - short_ret)
-        since_refresh += 1
-
-        if prev_legs is None or since_refresh >= max(1, int(rebalance_every)):
+        # ``_fwd_ret`` is already the next-session return of a book chosen today.
+        # Form or keep the legs first, then realise that same-day forward return.
+        # Crediting yesterday's book (and writing 0 on entry) both lags alpha by
+        # one session and disagrees with the daily long-short sign convention.
+        if prev_legs is None or since_refresh >= every:
             legs_row = daily_legs_dict[day]
             long_leg = set(legs_row["long_codes"])
             short_leg = set(legs_row["short_codes"])
@@ -519,7 +519,13 @@ def _layered_long_short_cadence(
             since_refresh = 0
         else:
             turnover_by_day[day] = 0.0
-        series.append((day, ls))
+        day_rets = ret_dict.get(day, {})
+        l_vals = [day_rets[c] for c in prev_legs[0] if c in day_rets]
+        s_vals = [day_rets[c] for c in prev_legs[1] if c in day_rets]
+        long_ret = sum(l_vals) / len(l_vals) if l_vals else 0.0
+        short_ret = sum(s_vals) / len(s_vals) if s_vals else 0.0
+        series.append((day, float(long_ret - short_ret)))
+        since_refresh += 1
 
     return series, turnover_by_day
 
@@ -543,14 +549,7 @@ def _load_eval_context(cfg: dict[str, Any]) -> tuple[Any, dict[Any, set[str]], A
 
 
 def _score_spec(panel: Any, spec: dict[str, Any]) -> Any:
-    import polars as pl
-
-    builder = TEMPLATES[spec["template"]][0]
-    raw_expr = builder(spec["field"], int(spec["window"]))
-    scored = panel.with_columns(raw_expr.alias("_raw")).with_columns(
-        pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
-    )
-    return scored.select(["trade_date", "ts_code", "_score"])
+    return score_candidate(panel, spec, _presorted=True)
 
 
 def _candidate_fold_chunk(
@@ -678,7 +677,8 @@ def _combined_fold_row(
             builder = TEMPLATES[spec["template"]][0]
             raw_exprs.append(builder(spec["field"], int(spec["window"])).alias(raw_col))
             rank_exprs.append(
-                pl.col(raw_col).rank(method="ordinal").over("trade_date").alias(col)
+                pl.when(pl.col(raw_col).is_finite()).then(pl.col(raw_col)).otherwise(None)
+                .rank(method="average").over("trade_date").alias(col)
             )
         acc = (
             panel.with_columns(raw_exprs)
@@ -731,7 +731,8 @@ def _combined_fold_row(
             scores = (
                 acc.with_columns(expr.alias("_raw"))
                 .with_columns(
-                    pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+                    pl.when(pl.col("_raw").is_finite()).then(pl.col("_raw")).otherwise(None)
+                    .rank(method="average").over("trade_date").alias("_score")
                 )
                 .select(["trade_date", "ts_code", "_score"])
             )

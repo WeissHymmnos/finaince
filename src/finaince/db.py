@@ -5,8 +5,18 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
-_INITIALIZED_SCHEMAS: set[tuple[str, int]] = set()
+_INITIALIZED_SCHEMAS: dict[tuple[str, int], tuple[int, int, int, int]] = {}
 _INIT_LOCK = threading.Lock()
+
+
+def _database_signature(path: str) -> tuple[int, int, int, int] | None:
+    try:
+        info = Path(path).stat()
+    except OSError:
+        return None
+    if info.st_size <= 0:
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
 def ensure_columns(
@@ -38,8 +48,17 @@ def managed_connection(
     """Open a SQLite connection with WAL, busy_timeout, normal sync, foreign keys, and guaranteed close."""
     is_memory = str(db_path) == ":memory:"
     path = Path(db_path) if not is_memory else db_path
+    resolved = ":memory:" if is_memory else str(Path(db_path).resolve())
+    matching_keys: list[tuple[str, int]] = []
     if isinstance(path, Path):
         path.parent.mkdir(parents=True, exist_ok=True)
+        with _INIT_LOCK:
+            pre_sig = _database_signature(resolved)
+            if pre_sig is not None:
+                matching_keys = [
+                    k for k, sig in _INITIALIZED_SCHEMAS.items()
+                    if k[0] == resolved and sig == pre_sig
+                ]
     conn = sqlite3.connect(str(path), timeout=timeout)
     if row_factory is not None:
         conn.row_factory = row_factory
@@ -52,6 +71,13 @@ def managed_connection(
             yield conn
     finally:
         conn.close()
+        if matching_keys:
+            with _INIT_LOCK:
+                post_sig = _database_signature(resolved)
+                if post_sig is not None:
+                    for key in matching_keys:
+                        if key in _INITIALIZED_SCHEMAS:
+                            _INITIALIZED_SCHEMAS[key] = post_sig
 
 
 def ensure_database_initialized(
@@ -69,10 +95,12 @@ def ensure_database_initialized(
     )
     cache_key = (resolved, ddl_key)
 
-    if cache_key in _INITIALIZED_SCHEMAS and not is_memory:
+    if not is_memory and _INITIALIZED_SCHEMAS.get(cache_key) == _database_signature(resolved) \
+            and cache_key in _INITIALIZED_SCHEMAS:
         return
     with _INIT_LOCK:
-        if cache_key in _INITIALIZED_SCHEMAS and not is_memory:
+        if not is_memory and _INITIALIZED_SCHEMAS.get(cache_key) == _database_signature(resolved) \
+                and cache_key in _INITIALIZED_SCHEMAS:
             return
         path = Path(db_path) if not is_memory else db_path
         if isinstance(path, Path):
@@ -109,7 +137,9 @@ def ensure_database_initialized(
         finally:
             conn.close()
         if not is_memory:
-            _INITIALIZED_SCHEMAS.add(cache_key)
+            signature = _database_signature(resolved)
+            if signature is not None:
+                _INITIALIZED_SCHEMAS[cache_key] = signature
 
 
 def reset_db_initialization_cache() -> None:

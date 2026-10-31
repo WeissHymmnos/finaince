@@ -14,6 +14,8 @@ from finaince.settings import get_settings
 def promote(catalog_id: str, *, direction: str, yes: bool = False) -> dict[str, Any]:
     from finaince.catalog.audit import append as audit_append
 
+    if direction not in {"to_pool", "to_library"}:
+        return {"ok": False, "error": "invalid_direction"}
     cat = FactorCatalog()
     rec = cat.get(catalog_id)
     if rec is None:
@@ -40,6 +42,8 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
     if not pending:
         return {"ok": False, "error": "promotion not pending"}
     event = pending[0]
+    if event["direction"] not in {"to_pool", "to_library"}:
+        return {"ok": False, "error": "invalid_direction"}
     rec = cat.get(event["catalog_id"])
     if rec is None:
         return {"ok": False, "error": "catalog row missing"}
@@ -57,7 +61,7 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
         from finaince.review.adversary import adversarial_review
 
         adv_res = adversarial_review(promotion_id)
-        if adv_res["verdict"] == "rejected":
+        if adv_res.get("verdict") != "approved" or adv_res.get("ok") is not True:
             return {"ok": False, "error": "adversary_rejected", "adversary": adv_res, "gates": gates}
     if event["direction"] == "to_pool":
         if not rec.daily_returns:
@@ -69,17 +73,28 @@ def approve(promotion_id: str, *, override: list[str] | None = None, adversary: 
         mapped = to_aiminer_dict(rec)
         if not mapped.get("code") or not mapped_aiminer_code(rec):
             return {"ok": False, "error": "empty_code", "gates": gates}
-        settings = get_settings()
-        persist_alpha_pool_rows(
-            settings.aiminer_db,
-            settings.aiminer_results,
-            [mapped],
-        )
-    elif event["direction"] == "to_library":
-        _write_library(rec)
-    rec.status = "ready"
-    cat.upsert(rec)
-    cat.update_promotion(promotion_id, "approved")
+    # Verification reads pending events. Claim only after it finishes, then
+    # recheck pending atomically before any engine/catalog side effect. A
+    # concurrent rejection or approval may have won during verification.
+    if not cat.transition_promotion(promotion_id, "approving", expected="pending"):
+        return {"ok": False, "error": "promotion not pending"}
+    try:
+        if event["direction"] == "to_pool":
+            settings = get_settings()
+            persist_alpha_pool_rows(
+                settings.aiminer_db,
+                settings.aiminer_results,
+                [mapped],
+            )
+        else:
+            _write_library(rec)
+        rec.status = "ready"
+        cat.upsert(rec)
+        if not cat.transition_promotion(promotion_id, "approved", expected="approving"):
+            raise RuntimeError("promotion approval claim lost")
+    except Exception:
+        cat.transition_promotion(promotion_id, "pending", expected="approving")
+        raise
     if adversary and adv_res is not None:
         gates["adversary"] = adv_res
     gates["override"] = {
@@ -104,14 +119,22 @@ def reject(promotion_id: str) -> dict[str, Any]:
     from finaince.catalog.audit import append as audit_append
 
     cat = FactorCatalog()
-    pending = [p for p in cat.list_promotions(None) if p["id"] == promotion_id]
+    pending = [p for p in cat.list_promotions("pending") if p["id"] == promotion_id]
+    if not pending:
+        return {"ok": False, "error": "promotion not pending"}
+    if not cat.transition_promotion(promotion_id, "rejecting", expected="pending"):
+        return {"ok": False, "error": "promotion not pending"}
     rec = None
-    if pending:
+    try:
         rec = cat.get(pending[0]["catalog_id"])
         if rec is not None:
             rec.status = "candidate"
             cat.upsert(rec)
-    cat.update_promotion(promotion_id, "rejected")
+        if not cat.transition_promotion(promotion_id, "rejected", expected="rejecting"):
+            raise RuntimeError("promotion rejection claim lost")
+    except Exception:
+        cat.transition_promotion(promotion_id, "pending", expected="rejecting")
+        raise
     audit_append("reject", {"promotion_id": promotion_id, "catalog_id": rec.id if rec else None})
     try:
         from finaince.obs import emit
@@ -150,7 +173,10 @@ def _write_library(rec) -> None:
 
     source_ref = rec.lineage.source_ref or rec.id
     report_id = rec.lineage.report_id or f"disc_{source_ref.replace(':', '')}"
-    md = paths.reports_dir / "synthetic" / f"{source_ref}.md"
+    # Source references can be paths supplied by another engine; never use
+    # them as a relative output filename.
+    source_digest = hashlib.sha256(source_ref.encode("utf-8")).hexdigest()
+    md = paths.reports_dir / "synthetic" / f"{source_digest}.md"
     md.parent.mkdir(parents=True, exist_ok=True)
     body = f"# {rec.name}\n\n{rec.expression.text}\n"
     md.write_text(body, encoding="utf-8")

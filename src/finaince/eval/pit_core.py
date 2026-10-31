@@ -27,7 +27,7 @@ def parse_rank_delta(expression: str) -> tuple[str, int, bool]:
 
 
 def score_expression(frame: Any, expression: str, *, _presorted: bool = False) -> Any:
-    """Cross-sectional ordinal rank of Delta(field, n). Negation ranks the negated delta."""
+    """Cross-sectional average rank of finite deltas; ties retain equal scores."""
     import polars as pl
 
     field, window, negate = parse_rank_delta(expression)
@@ -37,8 +37,10 @@ def score_expression(frame: Any, expression: str, *, _presorted: bool = False) -
     raw = pl.col(field) - pl.col(field).shift(window).over("ts_code")
     if negate:
         raw = -raw
-    ranked = panel.with_columns(raw.alias("_raw")).with_columns(
-        pl.col("_raw").rank(method="ordinal").over("trade_date").alias("_score")
+    ranked = panel.with_columns(
+        pl.when(raw.is_finite()).then(raw).otherwise(None).alias("_raw")
+    ).with_columns(
+        pl.col("_raw").rank(method="average").over("trade_date").alias("_score")
     )
     return ranked.select(["trade_date", "ts_code", "_score"])
 
@@ -62,10 +64,6 @@ def metrics_for_window(
 
     scoped = _scoped_universe(universe_by_day, start, end, embargo=embargo)
     metrics = _metrics_from_artifacts(_factor_artifacts(scores, forwards, scoped), cost_bps)
-    names: set[str] = set()
-    for members in scoped.values():
-        names.update(members)
-    metrics["n_names"] = len(names)
     metrics["n_days"] = metrics.get("days")
     metrics["cost_bps"] = cost_bps
     metrics["turnover_model"] = TURNOVER_MODEL
@@ -103,10 +101,6 @@ def score_frame_window(
     artifacts = _factor_artifacts(scores, forwards, scoped)
     metrics = _metrics_from_artifacts(artifacts, cost_bps)
 
-    names: set[str] = set()
-    for members in scoped.values():
-        names.update(members)
-    metrics["n_names"] = len(names)
     metrics["n_days"] = metrics.get("days")
     metrics["cost_bps"] = cost_bps
     metrics["turnover_model"] = TURNOVER_MODEL
@@ -126,7 +120,11 @@ def score_frame_window(
     metrics["daily_returns"] = daily
     metrics["ic_mean"] = metrics.get("ic")
     metrics["sharpe_ratio"] = metrics.get("sharpe_net")
-    metrics["citable"] = metrics.get("ic") is not None and int(metrics.get("n_names") or 0) >= 20
+    metrics["citable"] = (
+        metrics.get("ic") is not None
+        and int(metrics.get("min_names") or 0) >= 20
+        and len(daily) >= 20
+    )
     return metrics
 
 

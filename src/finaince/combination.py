@@ -44,11 +44,9 @@ def _rolling_inverse_vol_weights(rows: dict[str, list[float | None]], *, lookbac
     for day_index in range(n_days):
         inv_vols: dict[str, float] = {}
         for fid in factor_ids:
-            if rows[fid][day_index] is None:
-                continue
             raw_window = rows[fid][max(0, day_index - lookback) : day_index]
             window = [float(x) for x in raw_window if x is not None and math.isfinite(float(x))]
-            if len(window) < 5:
+            if len(window) < max(5, math.ceil(MIN_COVERAGE_RATIO * len(raw_window))):
                 continue
             mean = sum(window) / len(window)
             var = sum((x - mean) ** 2 for x in window) / len(window)
@@ -77,19 +75,11 @@ def combine_daily(
     """Combine member series with daily inverse-vol weights; net-of-cost metrics."""
     if not returns_by_factor:
         return {"ok": False, "reason": "no_members"}
-    common = None
-    for series in returns_by_factor.values():
-        keys = set(series)
-        common = keys if common is None else (common & keys)
-    common = common or set()
-    all_dates = sorted({d for s in returns_by_factor.values() for d in s})
-    covered_common = {
-        day
-        for day in all_dates
-        if sum(1 for s in returns_by_factor.values() if day in s)
-        >= max(min_factors, int(MIN_COVERAGE_RATIO * len(returns_by_factor)))
-    }
-    dates = [d for d in all_dates if d in covered_common] or all_dates
+    if len(returns_by_factor) < min_factors:
+        return {"ok": False, "reason": "insufficient_members"}
+    # Keep the complete calendar: filtering by today's available returns would
+    # use information that was unavailable when today's positions were chosen.
+    dates = sorted({d for s in returns_by_factor.values() for d in s})
     if len(dates) < 30:
         return {"ok": False, "reason": "insufficient_overlap", "days": len(dates)}
     rows = _series(returns_by_factor, dates)
@@ -97,16 +87,20 @@ def combine_daily(
 
     combo: dict[str, float] = {}
     turnovers: list[float] = []
-    prev_active: dict[str, float] | None = None
+    prev_active: dict[str, float] = {}
     for index, day in enumerate(dates):
         active = weights_history[index]
-        if not active:
+        if len(active) < min_factors:
+            active = {}
+        if not active and not prev_active:
             continue
-        gross = sum(w * float(rows[fid][index] or 0.0) for fid, w in active.items())
-        if prev_active is not None:
-            churn = _turnover(prev_active, active)
-            turnovers.append(churn)
-            gross -= weight_l1_cost(churn * 2.0, cost_bps)
+        missing = [fid for fid in active if rows[fid][index] is None]
+        if missing:
+            return {"ok": False, "reason": "missing_member_returns", "date": day, "members": missing}
+        gross = sum(w * float(rows[fid][index]) for fid, w in active.items())
+        churn = _turnover(prev_active, active)
+        turnovers.append(churn)
+        gross -= weight_l1_cost(churn * 2.0, cost_bps)
         prev_active = active
         combo[day] = gross
 
@@ -191,4 +185,4 @@ def try_combine_ready(*, min_factors: int = 2, limit: int = 50) -> dict[str, Any
     if len(windows) != 1 or None in next(iter(windows)):
         return {"ok": False, "reason": "incompatible_windows", "windows": [list(w) for w in windows]}
     payload = {record.id: {str(k): float(v) for k, v in record.daily_returns.items()} for record in records}
-    return combine_daily(payload)
+    return combine_daily(payload, min_factors=min_factors)

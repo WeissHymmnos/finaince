@@ -71,7 +71,12 @@
         });
         return { ok: res.ok, data: await res.json().catch(() => ({})) };
       }
-      function tag(text, cls = "") { return `<span class="tag ${cls}">${text}</span>`; }
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        })[ch]);
+      }
+      function tag(text, cls = "") { return `<span class="tag ${escapeHtml(cls)}">${escapeHtml(text)}</span>`; }
 
       async function loadCatalog() {
         const box = $("catalog-list");
@@ -92,7 +97,7 @@
             const card = document.createElement("div");
             card.className = citable ? "card" : "card folded";
             const formula = item.expression && item.expression.text ? item.expression.text : (item.formula || "");
-            card.innerHTML = `<b>${item.name || item.id}</b><br/>${tags.join(" ")}<pre class="muted">${String(formula).replace(/</g, "&lt;")}</pre>`;
+            card.innerHTML = `<b>${escapeHtml(item.name || item.id)}</b><br/>${tags.join(" ")}<pre class="muted">${escapeHtml(formula)}</pre>`;
             card.onclick = () => showGates(item.id);
             box.append(card);
           }
@@ -111,7 +116,7 @@
             let failureNames = [];
             let failureDetail = "";
             try {
-              const gates = await get(`/api/v1/review/${promo.id}/gates`);
+              const gates = await get(`/api/v1/review/${encodeURIComponent(promo.id)}/gates`);
               failureNames = gates.failures || [];
               failureDetail = JSON.stringify(gates.details || {});
             } catch (err) {
@@ -119,9 +124,9 @@
               failureDetail = String(err);
             }
             const failureText = failureNames.length ? failureNames.join(" ") : "none";
-            row.innerHTML = `${promo.catalog_id}<br/><span class="muted">${promo.direction} · ${(promo.created_at || "").slice(0, 19)}</span><br/>
-              <span class="gate-failures">${failureText}</span>
-              <pre class="muted gate-detail">${failureDetail.replace(/</g, "&lt;")}</pre>
+            row.innerHTML = `${escapeHtml(promo.catalog_id)}<br/><span class="muted">${escapeHtml(promo.direction)} · ${escapeHtml((promo.created_at || "").slice(0, 19))}</span><br/>
+              <span class="gate-failures">${escapeHtml(failureText)}</span>
+              <pre class="muted gate-detail">${escapeHtml(failureDetail)}</pre>
               <button data-act="gates">gates</button>
               <button data-act="adversary">adversary</button>
               <button data-act="approve" disabled>approve</button>
@@ -129,19 +134,19 @@
             row.querySelector('[data-act="gates"]').onclick = () => showGates(promo.catalog_id, promo.id);
             row.querySelector('[data-act="adversary"]').onclick = async () => {
               $("status").textContent = "adversary running…";
-              const out = await post(`/api/v1/review/${promo.id}/adversary`);
+              const out = await post(`/api/v1/review/${encodeURIComponent(promo.id)}/adversary`);
               const verdict = (out.data && (out.data.verdict || (out.data.gates && out.data.gates.adversary && out.data.gates.adversary.verdict))) || "";
               $("status").textContent = `adversary ${verdict || (out.ok ? "ok" : "failed")}`;
               if (verdict === "approved") row.querySelector('[data-act="approve"]').disabled = false;
               showGates(promo.catalog_id, promo.id);
             };
             row.querySelector('[data-act="approve"]').onclick = async () => {
-              const out = await post(`/api/v1/review/${promo.id}/approve`);
+              const out = await post(`/api/v1/review/${encodeURIComponent(promo.id)}/approve`);
               $("status").textContent = out.ok ? "approved" : `blocked: ${(out.data.gates?.failures || []).join(",")}`;
               loadReview();
             };
             row.querySelector('[data-act="reject"]').onclick = async () => {
-              await post(`/api/v1/review/${promo.id}/reject`);
+              await post(`/api/v1/review/${encodeURIComponent(promo.id)}/reject`);
               loadReview();
             };
             box.append(row);
@@ -154,19 +159,19 @@
         report.textContent = "…";
         try {
           let url;
-          if (promotionId) url = `/api/v1/review/${promotionId}/gates`;
+          if (promotionId) url = `/api/v1/review/${encodeURIComponent(promotionId)}/gates`;
           else {
             const promos = (await get("/api/v1/review")).items || [];
             const match = promos.find((p) => p.catalog_id === catalogId);
             if (!match) { report.textContent = "no pending promotion for this record"; return; }
-            url = `/api/v1/review/${match.id}/gates`;
+            url = `/api/v1/review/${encodeURIComponent(match.id)}/gates`;
           }
           const gates = await get(url);
           const failures = (gates.failures || []).map((f) => tag(f, "bad")).join(" ") || tag("passed", "good");
           const detail = gates.details || {};
-          report.innerHTML = `<div class="card"><b>${gates.promotion_id}</b> ${failures}
+          report.innerHTML = `<div class="card"><b>${escapeHtml(gates.promotion_id)}</b> ${failures}
             <div class="muted">failure detail</div>
-            <pre>${JSON.stringify(detail, null, 1).replace(/</g, "&lt;")}</pre></div>`;
+            <pre>${escapeHtml(JSON.stringify(detail, null, 1))}</pre></div>`;
         } catch (err) { report.textContent = String(err); }
       }
 
@@ -179,9 +184,9 @@
           for (const ev of data.items || []) {
             const item = document.createElement("div");
             item.className = "item";
-            item.innerHTML = `<b>${ev.action}</b> ${ev.ok === false ? tag("fail", "bad") : ""}
-              <span class="muted">${ev.ts || ""}</span><br/>
-              <span class="muted">${String(ev.hypothesis || ev.summary || "").slice(0, 140).replace(/</g, "&lt;")}</span>`;
+            item.innerHTML = `<b>${escapeHtml(ev.action)}</b> ${ev.ok === false ? tag("fail", "bad") : ""}
+              <span class="muted">${escapeHtml(ev.ts || "")}</span><br/>
+              <span class="muted">${escapeHtml(String(ev.hypothesis || ev.summary || "").slice(0, 140))}</span>`;
             box.append(item);
           }
         } catch (err) { box.textContent = String(err); }
@@ -204,9 +209,9 @@
             const status = job.status || "unknown";
             const reason = job.error || job.failure_reason || "—";
             const trace = job.trace_id || (job.result && job.result.trace_id) || "—";
-            item.innerHTML = `status <b class="job-status">${status}</b><br/>failure reason <span class="muted">${String(reason).replace(/</g, "&lt;")}</span><br/>trace id <span class="muted">${String(trace).replace(/</g, "&lt;")}</span> <button data-act="cancel">cancel</button>`;
+            item.innerHTML = `status <b class="job-status">${escapeHtml(status)}</b><br/>failure reason <span class="muted">${escapeHtml(reason)}</span><br/>trace id <span class="muted">${escapeHtml(trace)}</span> <button data-act="cancel">cancel</button>`;
             item.querySelector('[data-act="cancel"]').onclick = async () => {
-              await post(`/api/v1/jobs/${job.id}/cancel`);
+              await post(`/api/v1/jobs/${encodeURIComponent(job.id)}/cancel`);
               loadJobs();
             };
             box.append(item);

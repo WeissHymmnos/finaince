@@ -198,7 +198,7 @@ def swarm_argv(user_args: list[str] | None = None) -> list[str]:
     llm = resolve_llm()
 
     def _has(flag: str) -> bool:
-        return flag in args
+        return any(arg == flag or arg.startswith(flag + "=") for arg in args)
 
     extras: list[str] = []
     provider = (llm.get("aiminer_provider") or "").strip()
@@ -331,9 +331,9 @@ def doctor_report(settings: FinainceSettings | None = None, *, audit_check: bool
             "python": qlib_py or None,
         }
     else:
-        panel = qlib_local_data_path() or packaged_local_panel()
+        qlib_panel = qlib_local_data_path() or packaged_local_panel()
         qlib_child = {
-            "ok": bool(child_importable and panel is not None),
+            "ok": bool(child_importable and qlib_panel is not None),
             "enabled": True,
             "via": "qlib_child",
             "python": None,

@@ -73,7 +73,7 @@ def test_frontend_routes_controls_and_non_ai_stylesheet() -> None:
     assert "/api/v1/promote" in catalog and "deskFetch" in catalog
     assert "reject" in review and "gates" in review and "override" in review
     assert "deskFetch" in review
-    assert "/api/v1/jobs/" in repro and "no_factors" in repro and "deskFetch" in repro
+    assert "/api/v1/jobs/" in repro and "no_factors" in repro and "deskRequest" in repro
     assert "ok === false" in agent and "deskFetch" in agent
     assert "backdrop-filter" not in styles.lower()
     assert "linear-gradient" not in styles

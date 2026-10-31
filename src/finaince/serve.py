@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -26,9 +27,9 @@ class DeskAuthGate:
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         path = scope.get("path") or ""
         if (
-            scope["type"] == "http"
+            scope["type"] in {"http", "websocket"}
             and scope.get("method") != "OPTIONS"
-            and path.startswith("/api/v1/")
+            and (path == "/api/v1" or path.startswith("/api/v1/"))
             and path not in _PUBLIC_V1_PATHS
         ):
             from finaince.auth import desk_auth_ok
@@ -38,6 +39,9 @@ class DeskAuthGate:
                 for k, v in scope.get("headers") or []
             }
             if not desk_auth_ok(headers):
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
                 from starlette.responses import JSONResponse
 
                 response = JSONResponse(
@@ -46,6 +50,30 @@ class DeskAuthGate:
                 await response(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+
+def _positive_integer(body: dict[str, Any], key: str, default: int) -> int:
+    from fastapi import HTTPException
+
+    raw = body.get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        raise HTTPException(400, f"{key} must be a positive integer")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise HTTPException(400, f"{key} must be a positive integer") from None
+    if value < 1:
+        raise HTTPException(400, f"{key} must be a positive integer")
+    return value
+
+
+def _sync_option(body: dict[str, Any]) -> bool:
+    from fastapi import HTTPException
+
+    value = body.get("sync", True)
+    if not isinstance(value, bool):
+        raise HTTPException(400, "sync must be a boolean")
+    return value
 
 
 def resolve_workbench_dist() -> Path | None:
@@ -310,9 +338,12 @@ def create_app() -> Any:
         if backend == "auto":
             backend = resolve_data_source()
         try:
-            cost_bps = float(body.get("cost_bps") or 0.0)
-        except (TypeError, ValueError):
-            cost_bps = 0.0
+            raw_cost = body.get("cost_bps", 0.0)
+            cost_bps = float(raw_cost)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(400, "cost_bps must be a finite non-negative number") from None
+        if isinstance(raw_cost, bool) or not math.isfinite(cost_bps) or cost_bps < 0:
+            raise HTTPException(400, "cost_bps must be a finite non-negative number")
         req = EvalRequest(
             expression=str(body.get("expression") or ""),
             dialect=str(body.get("dialect") or "repro_polars"),
@@ -401,7 +432,7 @@ def create_app() -> Any:
             raise HTTPException(400, "pdf_path required")
         if not pdf_path_allowed(str(pdf)):
             raise HTTPException(status_code=403, detail="pdf_path must be under FINAINCE_PDF_ROOT")
-        sync = bool(body.get("sync", True))
+        sync = _sync_option(body)
         return await asyncio.to_thread(run_reproduce_job, str(pdf), sync=sync)
 
     @app.post("/api/v1/jobs/{job_id}/cancel")
@@ -417,7 +448,7 @@ def create_app() -> Any:
         prompt = str(body.get("prompt") or "").strip()
         if not prompt:
             raise HTTPException(400, "prompt required")
-        max_turns = int(body.get("max_turns") or 16)
+        max_turns = _positive_integer(body, "max_turns", 16)
         return await asyncio.to_thread(run_research_desk, prompt, max_turns=max_turns)
 
     @app.get("/api/v1/trace")
@@ -476,13 +507,9 @@ def create_app() -> Any:
     async def loop_route(request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
         from finaince.jobs.runner import run_loop_job
 
-        steps = int((body or {}).get("steps") or 2)
-        sync = bool((body or {}).get("sync", True))
-        raw_workers = (body or {}).get("workers") or 1
-        try:
-            workers = max(1, min(8, int(raw_workers)))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "workers must be an integer") from None
+        steps = _positive_integer(body or {}, "steps", 2)
+        sync = _sync_option(body or {})
+        workers = min(8, _positive_integer(body or {}, "workers", 1))
         raw_exprs = (body or {}).get("expressions")
         expressions: list[str] | None = None
         if isinstance(raw_exprs, list):

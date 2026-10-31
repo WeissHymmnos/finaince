@@ -37,8 +37,10 @@ def load_manifest() -> dict[str, Any]:
         return {"schema_version": MANIFEST_VERSION, "entries": {}}
     try:
         payload = json.loads(path.read_text())
-        if not isinstance(payload.get("entries"), dict):
+        if not isinstance(payload, dict) or not isinstance(payload.get("entries"), dict):
             raise ValueError("bad entries")
+        if not all(isinstance(record, dict) for record in payload["entries"].values()):
+            raise ValueError("bad entry records")
         return payload
     except (json.JSONDecodeError, ValueError):
         backup = path.with_suffix(".corrupt")
@@ -70,20 +72,30 @@ def classify_outcome(result: dict[str, Any] | None) -> tuple[str, list[str], str
     """Map one reproduction result to (state, catalog_ids, error)."""
     if result is None:
         return ("failed", [], "empty_result")
+    if not isinstance(result, dict) or not result:
+        return ("failed", [], "invalid_result")
     status = str(result.get("status") or "")
-    factors = result.get("factors") or []
+    factors = result.get("factors", [])
     error = result.get("error") or result.get("reason")
-    if status == "no_factors" or (status in {"", "ok"} and not factors):
-        return ("no_factors", [], None if status == "no_factors" else f"no_factors_from:{status or 'unknown'}")
     if isinstance(error, str) and error.strip():
         return ("failed", [], error[:300])
+    if status in {"error", "failed", "cancelled", "canceled"} or result.get("ok") is False:
+        return ("failed", [], f"reproduction_status:{status or 'failed'}")
+    # An explicit empty extraction is terminal and must not be reinterpreted
+    # from stray engine ids. Those ids are not catalog records.
+    if status == "no_factors":
+        return ("no_factors", [], None)
+    if not isinstance(factors, list) or any(not isinstance(factor, dict) for factor in factors):
+        return ("failed", [], "invalid_factors")
+    if not factors and status in {"no_factors", "ok"}:
+        return ("no_factors", [], None)
     catalog_ids = []
     for factor in factors:
         cid = factor.get("catalog_id") or factor.get("id")
         if cid:
             catalog_ids.append(str(cid))
     if not catalog_ids:
-        return ("no_factors", [], None)
+        return ("failed", [], "factors_without_catalog_ids" if factors else "missing_outcome")
     return ("done", catalog_ids, None)
 
 
@@ -92,9 +104,9 @@ def process_one(pdf_path: str | Path, *, backtest_kwargs: dict[str, Any] | None 
 
     try:
         raw = reproduce_report(Path(pdf_path), backtest_kwargs=backtest_kwargs)
+        applied = apply_report_outcome(raw)
     except Exception as exc:  # noqa: BLE001
         return {"state": "failed", "catalog_ids": [], "error": str(exc)[:300]}
-    applied = apply_report_outcome(raw)
     return {
         "state": applied["state"],
         "catalog_ids": applied["catalog_ids"],
@@ -170,6 +182,26 @@ def ready_pit_core_count() -> int:
 
 def apply_report_outcome(result: dict[str, Any] | None) -> dict[str, Any]:
     """no_factors never creates a catalog ready row."""
+    factors = result.get("factors") if isinstance(result, dict) else None
+    if isinstance(factors, list) and any(
+        isinstance(factor, dict) and factor.get("factor_id") and not factor.get("catalog_id")
+        for factor in factors
+    ):
+        from finaince.catalog.store import FactorCatalog
+
+        catalog = FactorCatalog()
+        resolved_factors = []
+        for factor in factors:
+            if not isinstance(factor, dict):
+                resolved_factors.append(factor)
+                continue
+            factor = dict(factor)
+            if factor.get("factor_id") and not factor.get("catalog_id"):
+                record = catalog.get_by_source_ref("reproduction", str(factor["factor_id"]))
+                if record is not None:
+                    factor["catalog_id"] = record.id
+            resolved_factors.append(factor)
+        result = {**result, "factors": resolved_factors}
     state, catalog_ids, error = classify_outcome(result)
     if state == "no_factors":
         return {
@@ -207,7 +239,7 @@ def reset_failed(root: str | Path | None = None) -> int:
     for key, record in manifest["entries"].items():
         if record.get("status") != "failed":
             continue
-        if root is not None and not key.startswith(str(Path(root).resolve())):
+        if root is not None and not Path(key).resolve().is_relative_to(Path(root).resolve()):
             continue
         record["status"] = "pending"
         moved += 1

@@ -134,8 +134,9 @@ def finish_job(
 ) -> dict[str, Any]:
     """Write a terminal status onto an existing job row and audit it."""
     with _connect() as conn:
-        conn.execute(
-            "UPDATE jobs SET status=?, result_json=?, error=?, updated_at=? WHERE id=?",
+        updated = conn.execute(
+            "UPDATE jobs SET status=?, result_json=?, error=?, updated_at=? "
+            "WHERE id=? AND status IN ('queued', 'running')",
             (
                 status,
                 json.dumps(result, default=str) if result is not None else None,
@@ -146,6 +147,8 @@ def finish_job(
         )
         conn.commit()
     row = _load_job(job_id) or {}
+    if not updated.rowcount:
+        return row
     kind = row.get("kind")
     try:
         from finaince.catalog.audit import append as audit_append
@@ -197,11 +200,13 @@ def submit(
     blob = json.dumps(payload, default=str)
     with _connect() as conn:
         if existing:
-            conn.execute(
+            updated = conn.execute(
                 "UPDATE jobs SET kind=?, status=?, payload_json=?, engine_run_id=?, pid=?, pgid=?, updated_at=? "
-                "WHERE id=?",
+                "WHERE id=? AND status IN ('queued', 'running')",
                 (kind, status, blob, engine_run_id or existing.get("engine_run_id"), pid, pgid, now, job_id),
             )
+            if not updated.rowcount:
+                return _load_job(job_id) or existing
         else:
             conn.execute(
                 "INSERT INTO jobs (id, kind, status, payload_json, engine_run_id, pid, pgid, created_at, updated_at) "
@@ -216,6 +221,11 @@ def submit(
         result = run()
         final = "done"
         error = None
+        if isinstance(result, dict) and (
+            result.get("ok") is False or result.get("status") in {"error", "failed"}
+        ):
+            final = "error"
+            error = str(result.get("error") or result.get("reason") or "job reported failure")
     except Exception as exc:  # noqa: BLE001
         result = None
         final = "error"
@@ -308,11 +318,16 @@ def start_process(kind: str, payload: dict[str, Any], argv: list[str]) -> dict[s
         return finish_job(job_id, status="error", error=str(exc))
     pgid = current_pgid(proc.pid)
     with _connect() as conn:
-        conn.execute(
-            "UPDATE jobs SET status=?, engine_run_id=?, pid=?, pgid=?, updated_at=? WHERE id=?",
+        updated = conn.execute(
+            "UPDATE jobs SET status=?, engine_run_id=COALESCE(engine_run_id, ?), pid=?, pgid=?, updated_at=? "
+            "WHERE id=? AND status IN ('queued', 'running')",
             ("running", str(proc.pid), proc.pid, pgid, _now(), job_id),
         )
         conn.commit()
+    if not updated.rowcount:
+        job = get_job(job_id, reap=False)
+        if job and job.get("status") == "cancelled":
+            terminate_process_tree(proc.pid, pgid)
     return get_job(job_id, reap=False) or {
         "id": job_id,
         "kind": kind,
@@ -322,9 +337,9 @@ def start_process(kind: str, payload: dict[str, Any], argv: list[str]) -> dict[s
 
 
 def delete_job(job_id: str) -> bool:
-    """Remove a terminal job row. Returns False when the id is unknown."""
+    """Remove a terminal job row; preserve active jobs and their cancellation handles."""
     with _connect() as conn:
-        cur = conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+        cur = conn.execute("DELETE FROM jobs WHERE id=? AND status IN ('done', 'error', 'cancelled')", (job_id,))
         conn.commit()
         return cur.rowcount > 0
 
@@ -337,17 +352,26 @@ def cancel(job_id: str) -> dict[str, Any]:
         return {"ok": False, "error": f"job not cancellable: {job.get('status')}", "job": job}
     pid = job.get("pid")
     pgid = job.get("pgid") or pid
+    if pid and (int(pid) == os.getpid() or int(pgid) == current_pgid()):
+        return {"ok": False, "error": "in_process_job_not_cancellable", "job": job}
+    with _connect() as conn:
+        updated = conn.execute(
+            "UPDATE jobs SET status=?, updated_at=? WHERE id=? AND status IN ('running', 'queued')",
+            ("cancelled", _now(), job_id),
+        )
+        conn.commit()
+    if not updated.rowcount:
+        return {"ok": False, "error": "job not cancellable", "job": get_job(job_id, reap=False)}
     if pid:
         try:
             terminate_process_tree(int(pid), int(pgid) if pgid else None)
         except PermissionError as exc:
+            with _connect() as conn:
+                conn.execute(
+                    "UPDATE jobs SET status=?, updated_at=? WHERE id=? AND status='cancelled'",
+                    (job["status"], _now(), job_id),
+                )
             return {"ok": False, "error": str(exc), "job": job}
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
-            ("cancelled", _now(), job_id),
-        )
-        conn.commit()
     return {"ok": True, "job": get_job(job_id)}
 
 

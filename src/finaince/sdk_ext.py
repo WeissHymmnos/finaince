@@ -439,6 +439,13 @@ def inspect_pre_tool_use(event: Any) -> dict[str, Any]:
     deny_reason = None
     if tool_name in _DENIED_TOOL_NAMES or tool_name.split("__")[-1] in {"unsafe", "Bash"}:
         deny_reason = f"tool {tool_name!r} is not permitted on the finaince SDK session"
+    elif tool_name in {"Task", "Agent"}:
+        from finaince.agent_playbook import specialist_briefs
+
+        if tool_input.get("subagent_type") not in specialist_briefs():
+            deny_reason = "delegation requires a registered FinAlpha specialist"
+    elif tool_name not in allowed_mcp_tool_names():
+        deny_reason = f"tool {tool_name!r} is not registered on the finaince SDK session"
     elif tool_name.endswith("reproduce_report"):
         pdf_path = str(tool_input.get("pdf_path") or "").strip()
         if not pdf_path:
@@ -451,7 +458,9 @@ def inspect_pre_tool_use(event: Any) -> dict[str, Any]:
                 from finaince.runtime import pdf_root
 
                 root = pdf_root()
-                if root.is_dir():
+                if not root.is_dir():
+                    deny_reason = "FINAINCE_PDF_ROOT must be an existing directory"
+                else:
                     try:
                         Path(pdf_path).resolve().relative_to(root.resolve())
                     except ValueError:
@@ -622,6 +631,8 @@ def try_live_query(prompt: str) -> dict[str, Any]:
     async def _run() -> list[str]:
         messages: list[str] = []
         async for message in query(prompt=prompt, options=build_claude_agent_options()):
+            if getattr(message, "is_error", False):
+                raise RuntimeError(str(getattr(message, "result", None) or "query returned an error result"))
             messages.append(type(message).__name__)
         return messages
 

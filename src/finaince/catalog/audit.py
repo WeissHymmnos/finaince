@@ -72,6 +72,9 @@ def append(action: str, detail: dict[str, Any] | None = None, actor: str = "cli"
     payload = _redact(detail or {})
     now = datetime.now(UTC).isoformat()
     with _connect() as conn:
+        # Reserve the writer before reading the tail so concurrent appenders
+        # cannot link two different rows to the same predecessor.
+        conn.execute("BEGIN IMMEDIATE")
         prev = conn.execute(
             "SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -121,13 +124,20 @@ def list_audit(action: str | None = None, limit: int = 100) -> list[dict[str, An
 
 def verify_tail(limit: int = 100) -> dict[str, Any]:
     rows = list(reversed(list_audit(limit=limit)))
-    ok = True
-    prev = ""
+    prev: str | None = None
     for row in rows:
-        if (row.get("prev_hash") or "") != prev and prev:
-            # first row may have empty prev
-            if row.get("prev_hash") not in {None, "", prev}:
-                ok = False
-                break
-        prev = row.get("hash") or ""
-    return {"ok": ok, "count": len(rows)}
+        prev_hash = row.get("prev_hash") or ""
+        # The first selected row can have a predecessor outside this window.
+        if prev is not None and prev_hash != prev:
+            return {"ok": False, "count": len(rows)}
+        blob = json.dumps(
+            {"ts": row["ts"], "action": row["action"], "detail": row["detail"],
+             "actor": row["actor"], "prev": prev_hash},
+            default=str,
+            sort_keys=True,
+        )
+        digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+        if row.get("hash") != digest:
+            return {"ok": False, "count": len(rows)}
+        prev = digest
+    return {"ok": True, "count": len(rows)}

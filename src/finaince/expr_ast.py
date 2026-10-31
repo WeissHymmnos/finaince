@@ -17,6 +17,8 @@ from __future__ import annotations
 import ast as pyast
 import bisect
 import hashlib
+import math
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -41,6 +43,10 @@ _IDEMPOTENT_UNARY = frozenset({"rank", "csrank", "abs", "sign"})
 # Bucketing feeds only the O(1) expr_hash dedup key; similarity keeps raw values
 # so that window 1 vs 2 stays distinguishable (acceptance test depends on it).
 _WINDOW_BUCKETS = (1, 5, 10, 20, 60, 120, 240)
+_WINDOW_OPERATORS = frozenset(
+    {"corr", "correlation", "cov", "covariance", "ref", "delay", "delta", "mean", "std", "sum",
+     "ts_mean", "ts_std", "ts_max", "ts_min", "ts_rank", "ts_sum", "ts_argmax", "ts_argmin"}
+)
 
 
 @dataclass(frozen=True)
@@ -61,7 +67,9 @@ class OpNode:
 
 
 def _strip_dialect_marks(text: str) -> str:
-    return text.replace("$", "").replace("|", "")
+    # Strip only field prefixes. Removing operators or stray '$' characters
+    # silently turns invalid expressions into unrelated valid syntax.
+    return re.sub(r"\$([A-Za-z_]\w*)", r"\1", text)
 
 
 def _bucket(value: float) -> int:
@@ -81,23 +89,25 @@ def _to_node(tree: pyast.AST) -> OpNode:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"unsupported constant: {value!r}")
         num = float(value)
-        if num != num:
-            raise ValueError("NaN constant")
+        if not math.isfinite(num):
+            raise ValueError("non-finite constant")
         return OpNode(op="__const__", params=(num,))
     if isinstance(tree, pyast.Call):
         func = tree.func
-        fname = getattr(func, "id", None) or getattr(func, "attr", None)
+        fname = func.id if isinstance(func, pyast.Name) else None
         if not isinstance(fname, str):
             raise ValueError(f"unsupported call target: {pyast.dump(func)[:80]}")
         op = fname.lower()
         children: list[OpNode] = []
         params: list[float] = []
-        for arg in tree.args:
-            node = _to_node(arg)
-            if node.op == "__const__":
-                params.append(node.params[0])
-            else:
-                children.append(node)
+        arguments = [_to_node(arg) for arg in tree.args]
+        # Window parameters conventionally trail data arguments. Keep constants
+        # before/between data arguments in place: Sub(1, close) != Sub(close, 1).
+        trailing = len(arguments)
+        while trailing and arguments[trailing - 1].op == "__const__":
+            trailing -= 1
+        children.extend(arguments[:trailing])
+        params.extend(node.params[0] for node in arguments[trailing:])
         for kw in tree.keywords:
             raise ValueError(f"keyword arguments unsupported: {kw.arg}")
         return OpNode(op=op, params=tuple(params), children=tuple(children))
@@ -143,7 +153,10 @@ def normalize(node: OpNode) -> OpNode:
     """Canonical form: fold idempotent wrappers, sort commutative children."""
     children = tuple(normalize(child) for child in node.children)
     params = node.params
-    if node.op in _IDEMPOTENT_UNARY and len(children) == 1 and children[0].op == node.op:
+    if (
+        node.op in _IDEMPOTENT_UNARY and not params and len(children) == 1
+        and children[0].op == node.op and not children[0].params
+    ):
         inner = children[0]
         return OpNode(op=node.op, params=params, children=inner.children)
     if node.op in _COMMUTATIVE:
@@ -164,7 +177,12 @@ def expr_hash(node_or_text: OpNode | str, dialect: str = "repro_polars") -> str:
     canon = normalize(node)
 
     def _coarse(n: OpNode) -> str:
-        params = ",".join(str(_bucket(float(p))) if n.op != "__field__" else str(p) for p in n.params)
+        params = ",".join(
+            str(_bucket(float(p)))
+            if n.op in _WINDOW_OPERATORS and i == len(n.params) - 1 and float(p) > 0
+            else str(p)
+            for i, p in enumerate(n.params)
+        )
         kids = "|".join(_coarse(c) for c in n.children)
         return f"{n.op}({params})[{kids}]"
 

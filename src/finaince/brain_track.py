@@ -13,8 +13,10 @@ ruling level drops and that drop is declared, never papered over.
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 from finaince._swallow import log_swallowed
 
@@ -78,31 +80,68 @@ def _client():
 
 
 def _extract_alpha_id(location: str) -> str | None:
-    tail = str(location).rstrip("/").split("/")[-1]
+    tail = urlsplit(str(location)).path.rstrip("/").split("/")[-1]
     return tail or None
+
+
+def _simulation_location(location: str) -> str:
+    """Keep authenticated polling on the configured BRAIN origin."""
+    base = urlsplit(brain_base())
+    target = urlsplit(urljoin(brain_base() + "/", location))
+
+    def origin(url):
+        return url.scheme, url.hostname, url.port or (443 if url.scheme == "https" else 80)
+
+    if (
+        target.scheme not in {"https", "http"}
+        or target.username is not None
+        or target.password is not None
+        or origin(target) != origin(base)
+        or not re.fullmatch(r"/(?:simulations|alphas)/[A-Za-z0-9_-]+/?", target.path)
+        or target.query
+        or target.fragment
+    ):
+        raise ValueError("unsafe_simulation_location")
+    return target.path
 
 
 def _poll_simulation(client: Any, location: str, *, max_seconds: int = 180) -> dict[str, Any]:
     deadline = time.monotonic() + max_seconds
-    url = str(location)
+    try:
+        url = _simulation_location(str(location))
+    except ValueError:
+        return {"ok": False, "error": "unsafe_simulation_location"}
     while time.monotonic() < deadline:
         response = client.get(url)
-        retry_after = response.headers.get("Retry-After")
-        if retry_after:
-            time.sleep(min(float(retry_after), 10.0))
-            continue
         if response.status_code >= 400:
             return {
                 "ok": False,
                 "error": f"simulation_poll_failed:{response.status_code}",
                 "detail": (response.text or "")[:300],
             }
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                delay = max(0.1, min(float(retry_after), 10.0))
+            except ValueError:
+                delay = 1.0
+            time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
+            continue
         payload = response.json() if response.content else {}
-        progress = str(payload.get("progress") or "")
-        if progress in {"COMPLETE", "100%", "1.0"} or "alphas" in url:
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "simulation_invalid_payload"}
+        if payload.get("status") in {"ERROR", "FAILED", "CANCELLED"}:
+            return {"ok": False, "error": f"simulation_failed:{payload['status']}"}
+        alpha_id = payload.get("alpha")
+        if url.startswith("/alphas/"):
             alpha_id = _extract_alpha_id(url)
+        if alpha_id is not None:
+            if not isinstance(alpha_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", alpha_id):
+                return {"ok": False, "error": "simulation_invalid_alpha_id"}
             return {"ok": True, "alpha_id": alpha_id, "payload": payload}
-        time.sleep(1.0)
+        if str(payload.get("progress")) in {"COMPLETE", "100%", "1.0", "1"} or payload.get("status") == "COMPLETE":
+            return {"ok": False, "error": "simulation_missing_alpha_id"}
+        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
     return {"ok": False, "error": "simulation_timeout"}
 
 
@@ -144,14 +183,19 @@ def submit_expression(
         detail: dict[str, Any] = {}
         if alpha_id:
             fetched = client.get(f"/alphas/{alpha_id}")
-            if fetched.status_code < 400 and fetched.content:
-                body = fetched.json()
-                detail = {
-                    "grade": body.get("grade"),
-                    "is_sharpe": (body.get("is") or {}).get("sharpe"),
-                    "is_fitness": (body.get("is") or {}).get("fitness"),
-                    "status": body.get("status"),
+            if fetched.status_code >= 400 or not fetched.content:
+                return {
+                    "ok": False,
+                    "adjudication_level": "none",
+                    "reason": f"alpha_fetch_failed:{fetched.status_code}",
                 }
+            body = fetched.json()
+            detail = {
+                "grade": body.get("grade"),
+                "is_sharpe": (body.get("is") or {}).get("sharpe"),
+                "is_fitness": (body.get("is") or {}).get("fitness"),
+                "status": body.get("status"),
+            }
         return {
             "ok": True,
             "adjudication_level": "platform",

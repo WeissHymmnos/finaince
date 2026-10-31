@@ -10,7 +10,7 @@ if they are not already present.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import polars as pl
@@ -294,6 +294,103 @@ def _patched_backtester_run(
     )
 
 
+def neutralize_industry(
+    factor: Any,
+    industry: Any,
+    date: Any | None = None,
+) -> Any:
+    """Cross-sectional industry demeaning that preserves exact row alignment and optional date grouping."""
+    import polars as pl
+
+    cols: dict[str, Any] = {
+        "_idx": range(len(factor)),
+        "factor": factor,
+        "industry": industry,
+    }
+    group_keys = ["industry"]
+    if date is not None:
+        cols["date"] = date
+        group_keys = ["date", "industry"]
+    df = pl.DataFrame(cols)
+    valid = pl.col("factor").is_not_null() & pl.col("factor").is_finite() & pl.col("industry").is_not_null()
+    if df.filter(valid).is_empty():
+        return factor
+    clean_factor = pl.when(valid).then(pl.col("factor")).otherwise(None)
+    ind_mean = clean_factor.mean().over(group_keys)
+    res = df.with_columns(
+        pl.when(valid).then(pl.col("factor") - ind_mean).otherwise(None).alias("neutral_factor")
+    )
+    return res["neutral_factor"]
+
+
+def neutralize_market_cap(
+    factor: Any,
+    log_mcap: Any,
+    date: Any | None = None,
+) -> Any:
+    """Cross-sectional OLS size neutralization preserving exact row alignment and optional date grouping."""
+    import numpy as np
+    import polars as pl
+
+    n = len(factor)
+    if n == 0:
+        return factor
+    f_arr = factor.to_numpy().astype(float, copy=True)
+    m_arr = log_mcap.to_numpy().astype(float, copy=True)
+    f_null = factor.is_null().to_numpy()
+    m_null = log_mcap.is_null().to_numpy()
+    valid = (~f_null) & (~m_null) & np.isfinite(f_arr) & np.isfinite(m_arr)
+    if not np.any(valid):
+        return factor
+
+    out = np.full(n, np.nan, dtype=float)
+    if date is None:
+        groups = [np.where(valid)[0]]
+    else:
+        d_list = date.to_list()
+        by_date: dict[Any, list[int]] = {}
+        for idx, is_ok in enumerate(valid):
+            if is_ok and d_list[idx] is not None:
+                by_date.setdefault(d_list[idx], []).append(idx)
+        groups = [np.array(idxs, dtype=int) for idxs in by_date.values()]
+
+    for idxs in groups:
+        if len(idxs) == 0:
+            continue
+        x = m_arr[idxs]
+        y = f_arr[idxs]
+        if len(idxs) < 2 or float(np.std(x)) <= 1e-12:
+            out[idxs] = y - float(np.mean(y))
+            continue
+        design = np.column_stack([np.ones(len(x)), x])
+        beta, *_ = np.linalg.lstsq(design, y, rcond=None)
+        out[idxs] = y - design @ beta
+
+    series = pl.Series("neutral_factor", [None if np.isnan(v) else float(v) for v in out], dtype=pl.Float64)
+    return series
+
+
+def neutralize_cross_sectional(
+    df: Any,
+    factor_col: str = "factor_value",
+    industry_col: str | None = "industry",
+    log_mcap_col: str | None = "log_mcap",
+    date_col: str = "date",
+) -> Any:
+    """Strict per-date cross-sectional industry mean and size residual neutralization."""
+    import polars as pl
+
+    if df.is_empty():
+        return df.with_columns(pl.lit(None).cast(pl.Float64).alias("neutral_factor"))
+    date_series = df[date_col] if date_col in df.columns else None
+    current = df[factor_col]
+    if industry_col and industry_col in df.columns:
+        current = neutralize_industry(current, df[industry_col], date=date_series)
+    if log_mcap_col and log_mcap_col in df.columns:
+        current = neutralize_market_cap(current, df[log_mcap_col], date=date_series)
+    return df.with_columns(current.alias("neutral_factor"))
+
+
 def ensure_reproagent_compat() -> None:
     """Attach A-share microstructure constraints to older reproagent installs."""
     try:
@@ -305,6 +402,9 @@ def ensure_reproagent_compat() -> None:
     if not hasattr(_bt, "_enrich_trading_constraints"):
         _bt._enrich_trading_constraints = _enrich_trading_constraints  # type: ignore[attr-defined]
         _bt.StrategyBacktester.run = _patched_backtester_run  # type: ignore[method-assign]
+    _bt.neutralize_industry = neutralize_industry  # type: ignore[attr-defined]
+    _bt.neutralize_market_cap = neutralize_market_cap  # type: ignore[attr-defined]
+    _bt.neutralize_cross_sectional = neutralize_cross_sectional  # type: ignore[attr-defined]
 
     try:
         from pydantic import ConfigDict

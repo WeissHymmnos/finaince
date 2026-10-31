@@ -173,7 +173,7 @@ def test_desk_approve_flow(monkeypatch):
     )
     assert app_override["ok"]
     
-    # Thin data row -> gates skipped not failed
+    # Insufficient statistical evidence must block promotion.
     rec_thin = FactorRecord(
         id="fac_thin",
         name="thin",
@@ -197,8 +197,8 @@ def test_desk_approve_flow(monkeypatch):
     app_thin = approve(
         pid_thin, override=["thin_panel", "homogeneous"], adversary=False
     )  # override thin_panel so it doesn't fail on that
-    assert app_thin["ok"]
-    assert "weak_ic" not in app_thin["gates"]["failures"]
-    assert "inflated_sharpe" not in app_thin["gates"]["failures"]
+    assert not app_thin["ok"]
+    assert "weak_ic" in app_thin["gates"]["failures"]
+    assert "inflated_sharpe" in app_thin["gates"]["failures"]
     assert app_thin["gates"]["details"]["weak_ic"] == "insufficient_for_t_stat"
     assert app_thin["gates"]["details"]["inflated_sharpe"] == "insufficient_returns"
